@@ -9,10 +9,10 @@
 <body>
 <header class="site-header" role="banner">
     <div class="wrapper">
-  <a class="site-title" rel="author" href="http://localhost:1313/">nkga blog</a>
+  <a class="site-title" rel="author" href="https://nkga.github.io/">nkga blog</a>
   <nav class="site-nav">
     <a class="site-link" href="../../post">posts</a>
-    <a class="site-link" href="../../about">about</a>
+    <a class="site-link" href="https://github.com/nkga/">github</a>
   </nav>
 </div>
 </header>
@@ -29,8 +29,8 @@ the game <a href="https://store.steampowered.com/app/264710/Subnautica/">Subnaut
 It is open source and available on <a href="https://github.com/nkga/shinkai">GitHub</a>.</p>
 
 <p>The mod was tested on the March update of the game (Update 84), but it seems to work
-with the April build as well. I have personally verified that the game was playable
-from beginning to completion with 3 friends online, but there isn&rsquo;t any explicit limit.
+with the April build too. I have personally verified that the game was playable
+from beginning to completion with 3 friends online, but there isn&rsquo;t any forced limit.
 As far as a feature list goes, most of the single player experience carries over
 to multiplayer the way you would expect it to.</p>
 
@@ -126,32 +126,32 @@ as you would expect.</p>
 <p>This was the hardest to get working right between the clients. In hindsight,
 all of the problems associated with synchronizing base building could have been
 solved by doing a full serialize/sync with the associated base after any
-construction event, even if this inefficient bandwidth-wise.</p>
+construction event, even if this is inefficient bandwidth-wise.</p>
 
 <p>The way the building currently works is loosely based on existing work by
-the Nitrox team &ndash; when a player builds or modifies a base piece, it&rsquo;s
+the Nitrox team &ndash; when a player builds or modifies a base piece, it is
 simulated across all clients.</p>
 
-<p>The first problem was with piece rotation. To have the pieces rotated the
-same across each client, a unique patch to the game&rsquo;s code for each
-type was required. If the game adds any new types of pieces in the future,
+<p>The first problem was handling piece rotation. To have the pieces rotated the
+same across on each client, each rotatable piece needed a unique patch to
+Subnautica&rsquo;s code. If the game adds any new types of pieces in the future,
 more work be required to support them.</p>
 
-<p>The second problem is due to synchronization and replay. When deconstructing
+<p>The second problem was dealing with synchronization. When deconstructing
 a base piece, a new object is typically spawned in its place. Knowing which
 object is replaced is tricky, and the server doesn&rsquo;t have knowledge of the
-base structure itself &ndash; which means any base modification must be stored
-and replayed to a client on connection. Since events can be received
-in a single frame, problems arise with base pieces getting blocked by
-pieces that would be considered gone on the next frame after Unity has
-processed the destruction event. This typically only happened with
-window / reinforcement pieces, and required additional patches
-to support.</p>
+base structure itself &ndash; which means any modification must be stored
+on the server, even if the base piece gets removed later.</p>
 
-<p>It was fairly easy to synchronize missing functionality with these
-problems fixed &ndash; most of these base pieces are just glorified item
-containers, and require only the addition of sharing a container GUID
-during creation.</p>
+<p>Since any number of events can be received in a single frame, problems arise with
+base pieces getting blocked by pieces that would be considered gone on the next frame
+after Unity has processed the destruction event. This typically only happened with
+window / reinforcement pieces, and required patches to resolve the bug.</p>
+
+<p>With these problems fixed, implementing missing functionality for synchronized
+base pieces is fairly trivial. Most of the functional base pieces are glorified
+item containers and simply requiring maintaining a shared GUID across all clients
+that was generated during placement.</p>
 
 <h3 id="vehicles">Vehicles</h3>
 
@@ -173,26 +173,26 @@ to.</p>
 
 <h3 id="physics-synchronization">Physics Synchronization</h3>
 
-<p>Proper interpolation and synchronization of game objects is a topic on its
-on that I plan to write about in the future. In Nitrox, most objects
-continuously interpolated towards their real position but would never reach it.
-Vehicles were mishandled by relying on PhysX to be deterministic
+<p>In Nitrox, most objects continuously interpolated towards their real position but
+would never attain the actual value.
+Vehicles were also mishandled by relying on PhysX to be deterministic
 (it&rsquo;s not) with velocity simulation &ndash; in my tests, vehicle position
 would drift by many meters over time.</p>
 
-<p>In Shinkai, players and player controlled vehicles are interpolated towards
+<p>In Shinkai, players and controlled vehicles are interpolated towards
 their last received position from the server at a dynamic rate. The rate is
-determined by a calculated packet update frequency and latency. To keep
+determined by the calculated packet update frequency and latency. To keep
 things smooth if packets are dropped or late, limited extrapolation is allowed
 when the interpolation deadline expires.</p>
 
-<p>Players can push around items and unmanned vehicles in Nitrox, so I wanted
-to synchronize those too. Since these are typically very slow moving, I
+<p>Players can push around items and unmanned vehicles in Subnautica, so I wanted
+to synchronize those too. Since these are typically slow moving, I
 rely on the client&rsquo;s physics simulation to keep them in roughly the same
 place. Whenever they stray too far away from their last updated position,
 the player notifies the server of the new location. While saving bandwidth
 with nice, this also lets any client interact and push these
-objects.</p>
+objects - everyone is considered the host when it comes to shared physics
+experiences like this.</p>
 
 <h3 id="release-and-future-support">Release and Future Support</h3>
 

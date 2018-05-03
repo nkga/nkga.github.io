@@ -2,21 +2,21 @@
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
   <channel>
     <title>Game Development on nkga blog</title>
-    <link>http://localhost:1313/categories/game-development/</link>
+    <link>https://nkga.github.io/categories/game-development/</link>
     <description>Recent content in Game Development on nkga blog</description>
     <generator>Hugo -- gohugo.io</generator>
     <language>en-us</language>
     <lastBuildDate>Tue, 01 May 2018 00:00:00 +0000</lastBuildDate>
     
-	<atom:link href="http://localhost:1313/categories/game-development/index.xml" rel="self" type="application/rss+xml" />
+	<atom:link href="https://nkga.github.io/categories/game-development/index.xml" rel="self" type="application/rss+xml" />
     
     
     <item>
       <title>Shinkai: A Subnautica Multiplayer Mod</title>
-      <link>http://localhost:1313/post/shinkai-a-subnautica-multiplayer-mod/</link>
+      <link>https://nkga.github.io/post/shinkai-a-subnautica-multiplayer-mod/</link>
       <pubDate>Tue, 01 May 2018 00:00:00 +0000</pubDate>
       
-      <guid>http://localhost:1313/post/shinkai-a-subnautica-multiplayer-mod/</guid>
+      <guid>https://nkga.github.io/post/shinkai-a-subnautica-multiplayer-mod/</guid>
       <description>&lt;p&gt;&lt;img src=&#34;../../img/subnautica_players.jpg&#34; alt=&#34;Subnautica Multiplayer&#34; /&gt;&lt;/p&gt;
 
 &lt;p&gt;Shinkai (深海) is a multiplayer mod for
@@ -24,8 +24,8 @@ the game &lt;a href=&#34;https://store.steampowered.com/app/264710/Subnautica/&#
 It is open source and available on &lt;a href=&#34;https://github.com/nkga/shinkai&#34;&gt;GitHub&lt;/a&gt;.&lt;/p&gt;
 
 &lt;p&gt;The mod was tested on the March update of the game (Update 84), but it seems to work
-with the April build as well. I have personally verified that the game was playable
-from beginning to completion with 3 friends online, but there isn&amp;rsquo;t any explicit limit.
+with the April build too. I have personally verified that the game was playable
+from beginning to completion with 3 friends online, but there isn&amp;rsquo;t any forced limit.
 As far as a feature list goes, most of the single player experience carries over
 to multiplayer the way you would expect it to.&lt;/p&gt;
 
@@ -35,10 +35,10 @@ to multiplayer the way you would expect it to.&lt;/p&gt;
     
     <item>
       <title>Frame Pacing: Analysis of the Game Loop</title>
-      <link>http://localhost:1313/post/frame-pacing-analysis-of-the-game-loop/</link>
+      <link>https://nkga.github.io/post/frame-pacing-analysis-of-the-game-loop/</link>
       <pubDate>Sun, 22 Apr 2018 00:00:00 +0000</pubDate>
       
-      <guid>http://localhost:1313/post/frame-pacing-analysis-of-the-game-loop/</guid>
+      <guid>https://nkga.github.io/post/frame-pacing-analysis-of-the-game-loop/</guid>
       <description>&lt;p&gt;&lt;img src=&#34;../../img/msvc_frametime_analysis.png&#34; alt=&#34;Frame Pacing Analysis&#34; /&gt;&lt;/p&gt;
 
 &lt;p&gt;The graph above was generated from Visual Studio&amp;rsquo;s performance profiler on a custom
@@ -56,10 +56,10 @@ the low level details that you can implement in your own engine.
     
     <item>
       <title>Video Playback for Games with VP9</title>
-      <link>http://localhost:1313/post/video-playback-for-games-with-vp9/</link>
+      <link>https://nkga.github.io/post/video-playback-for-games-with-vp9/</link>
       <pubDate>Sat, 14 Apr 2018 00:00:00 +0000</pubDate>
       
-      <guid>http://localhost:1313/post/video-playback-for-games-with-vp9/</guid>
+      <guid>https://nkga.github.io/post/video-playback-for-games-with-vp9/</guid>
       <description>&lt;p&gt;When working on porting an older PC game to a modern version of Windows I
 needed play its prerecorded videos in-game. Commercial engines (Unity, UE4)
 include this functionality, and there are also standalone solutions

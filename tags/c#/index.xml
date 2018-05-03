@@ -2,21 +2,21 @@
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
   <channel>
     <title>C# on nkga blog</title>
-    <link>http://localhost:1313/tags/c#/</link>
+    <link>https://nkga.github.io/tags/c#/</link>
     <description>Recent content in C# on nkga blog</description>
     <generator>Hugo -- gohugo.io</generator>
     <language>en-us</language>
     <lastBuildDate>Tue, 01 May 2018 00:00:00 +0000</lastBuildDate>
     
-	<atom:link href="http://localhost:1313/tags/c#/index.xml" rel="self" type="application/rss+xml" />
+	<atom:link href="https://nkga.github.io/tags/c#/index.xml" rel="self" type="application/rss+xml" />
     
     
     <item>
       <title>Shinkai: A Subnautica Multiplayer Mod</title>
-      <link>http://localhost:1313/post/shinkai-a-subnautica-multiplayer-mod/</link>
+      <link>https://nkga.github.io/post/shinkai-a-subnautica-multiplayer-mod/</link>
       <pubDate>Tue, 01 May 2018 00:00:00 +0000</pubDate>
       
-      <guid>http://localhost:1313/post/shinkai-a-subnautica-multiplayer-mod/</guid>
+      <guid>https://nkga.github.io/post/shinkai-a-subnautica-multiplayer-mod/</guid>
       <description>&lt;p&gt;&lt;img src=&#34;../../img/subnautica_players.jpg&#34; alt=&#34;Subnautica Multiplayer&#34; /&gt;&lt;/p&gt;
 
 &lt;p&gt;Shinkai (深海) is a multiplayer mod for
@@ -24,8 +24,8 @@ the game &lt;a href=&#34;https://store.steampowered.com/app/264710/Subnautica/&#
 It is open source and available on &lt;a href=&#34;https://github.com/nkga/shinkai&#34;&gt;GitHub&lt;/a&gt;.&lt;/p&gt;
 
 &lt;p&gt;The mod was tested on the March update of the game (Update 84), but it seems to work
-with the April build as well. I have personally verified that the game was playable
-from beginning to completion with 3 friends online, but there isn&amp;rsquo;t any explicit limit.
+with the April build too. I have personally verified that the game was playable
+from beginning to completion with 3 friends online, but there isn&amp;rsquo;t any forced limit.
 As far as a feature list goes, most of the single player experience carries over
 to multiplayer the way you would expect it to.&lt;/p&gt;
 

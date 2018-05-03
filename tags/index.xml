@@ -2,30 +2,30 @@
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
   <channel>
     <title>Tags on nkga blog</title>
-    <link>http://localhost:1313/tags/</link>
+    <link>https://nkga.github.io/tags/</link>
     <description>Recent content in Tags on nkga blog</description>
     <generator>Hugo -- gohugo.io</generator>
     <language>en-us</language>
     <lastBuildDate>Tue, 01 May 2018 00:00:00 +0000</lastBuildDate>
     
-	<atom:link href="http://localhost:1313/tags/index.xml" rel="self" type="application/rss+xml" />
+	<atom:link href="https://nkga.github.io/tags/index.xml" rel="self" type="application/rss+xml" />
     
     
     <item>
       <title>C#</title>
-      <link>http://localhost:1313/tags/c#/</link>
+      <link>https://nkga.github.io/tags/c#/</link>
       <pubDate>Tue, 01 May 2018 00:00:00 +0000</pubDate>
       
-      <guid>http://localhost:1313/tags/c#/</guid>
+      <guid>https://nkga.github.io/tags/c#/</guid>
       <description></description>
     </item>
     
     <item>
       <title>C&#43;&#43;</title>
-      <link>http://localhost:1313/tags/c&#43;&#43;/</link>
+      <link>https://nkga.github.io/tags/c&#43;&#43;/</link>
       <pubDate>Sun, 22 Apr 2018 00:00:00 +0000</pubDate>
       
-      <guid>http://localhost:1313/tags/c&#43;&#43;/</guid>
+      <guid>https://nkga.github.io/tags/c&#43;&#43;/</guid>
       <description></description>
     </item>
     
