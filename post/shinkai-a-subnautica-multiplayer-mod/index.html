@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Shinkai: A Subnautica Multiplayer Mod | nkga blog</title>
+  <link rel="stylesheet" href="../../css/style.css" />
+</head>
+<body>
+<header class="site-header" role="banner">
+    <div class="wrapper">
+  <a class="site-title" rel="author" href="http://localhost:1313/">nkga blog</a>
+  <nav class="site-nav">
+    <a class="site-link" href="../../post">posts</a>
+    <a class="site-link" href="../../about">about</a>
+  </nav>
+</div>
+</header>
+<div class="wrapper">
+<main class="page-content" aria-label="Content">
+
+<article>
+    <h1 class="post-title">Shinkai: A Subnautica Multiplayer Mod</h1>
+    <p class="post-meta">Posted on 2018/05/01</p>
+    <p><img src="../../img/subnautica_players.jpg" alt="Subnautica Multiplayer" /></p>
+
+<p>Shinkai (深海) is a multiplayer mod for
+the game <a href="https://store.steampowered.com/app/264710/Subnautica/">Subnautica</a>.
+It is open source and available on <a href="https://github.com/nkga/shinkai">GitHub</a>.</p>
+
+<p>The mod was tested on the March update of the game (Update 84), but it seems to work
+with the April build as well. I have personally verified that the game was playable
+from beginning to completion with 3 friends online, but there isn&rsquo;t any explicit limit.
+As far as a feature list goes, most of the single player experience carries over
+to multiplayer the way you would expect it to.</p>
+
+<p>Notes on development of the mod and its challenges follow below.
+</p>
+
+<h3 id="mod-history-nitrox">Mod History: Nitrox</h3>
+
+<p>Before developing Shinkai, I looked into existing efforts to make the game multiplayer.
+The only organized attempt I could find was <a href="https://github.com/SubnauticaNitrox/Nitrox">Nitrox</a>.
+However, it no longer seems to be in active development and was missing many core features that I felt were required for a fun co-op
+experience:</p>
+
+<ul>
+<li>No support for loading or saving progress</li>
+<li>Base building was non functional, no piece/room rotation support</li>
+<li>Base building was only synced for players that were currently connected to the server</li>
+<li>Most bases pieces (reactors, growbeds, etc) were non functional</li>
+<li>Can&rsquo;t see equipment on other players</li>
+<li>Player and vehicle positions desynchronize, no Cyclops submarine support</li>
+<li>Poor latency in real networking conditions</li>
+</ul>
+
+<p>I have addressed all of these issues with the development of Shinkai.</p>
+
+<h3 id="diving-in">Diving In</h3>
+
+<p>Subnautica is a game developed in <a href="https://unity3d.com/">Unity</a>, so it&rsquo;s trivial
+to reverse engineer. You can use tools like <a href="https://github.com/icsharpcode/ILSpy">ILSpy</a>
+to dump the full source code for the game contained in its <code>Assembly-CSharp-*</code> files.
+To get the game loading the mod, I use <a href="https://github.com/0xd4d/dnSpy">DNSpy</a> to
+patch the C# IL on a function that gets called at game startup. This patch calls into
+the Shinkai assembly and its initialization functions.</p>
+
+<p>Although you can write entire mods by modifying the original assemblies directly with DNSpy,
+ it&rsquo;s not really manageable when you have to apply a lot of patches. Most Unity game modders
+ make use of <a href="https://github.com/pardeike/Harmony">Harmony</a> &ndash; a library for modifying the C#
+ IL dynamically at runtime. It&rsquo;s what I use for Shinkai and its ~50 patches.</p>
+
+<h3 id="networking">Networking</h3>
+
+<p>I use <a href="https://gafferongames.com/post/udp_vs_tcp/">UDP</a> for any real-time game networking.
+Unreliable packets are a great bandwidth and performance optimization for anything sent
+on an interval (like physics). Everything else &ndash; connection negotiation, gameplay actions,
+entity spawning, state changes and chat &ndash; require an additional TCP-like reliability layer
+on top of UDP to ensure their packets are delivered and in-order.</p>
+
+<p>I tried out <a href="https://github.com/RevenantX/LiteNetLib">LiteNetLib</a> for the
+reliability layer for Shinkai since I didn&rsquo;t want to spend the time
+developing something <a href="https://gafferongames.com/post/reliability_ordering_and_congestion_avoidance_over_udp/">custom</a>
+for a C# project.
+It picked it mostly because its API, but it also seemed to perform well on
+<a href="https://github.com/nxrighthere/BenchmarkNet/wiki/Benchmark-Results">benchmarks</a> for performance.
+This is something I would probably reevaluate if I went back to the project, however.
+It took modification of the default MTU rates and queue sizes to get something
+that work reliably under real world conditions, and I&rsquo;m still not
+content with how clients can&rsquo;t &ldquo;reconnect&rdquo; without recreating the socket and
+changing their local connection port.</p>
+
+<h3 id="saving-and-loading">Saving and Loading</h3>
+
+<p>Subnautica save files serialize game entities (bases, vehicles, the player)
+and the map (voxel data, loot spawns). Game entities are fast to synchronize,
+since that data is only a few kilobytes in size. The map data weighs in at
+multiple megabytes, and because the generator state isn&rsquo;t deterministic it
+means that future spawns won&rsquo;t be synchronized. I opted to have the server
+be in control of a custom save format.</p>
+
+<p>I first modded the loot and entity spawners in the game to be deterministic based on a
+server seed, to save having to synchronize megabytes when a client connects. Since
+players can encounter chunks in any order, I mix the server seed with the position
+data for the spawn location on the map. The loot remains fairly random, and
+players can share locations of loot and research unlocks with each other since the map
+is the same. However, I don&rsquo;t synchronize gathering of the resources between clients.
+The world&rsquo;s resources are finite and fairly scarce &ndash; with many players you&rsquo;d quickly
+run out of loot.</p>
+
+<p>For game entities like bases and vehicles, I store their relevant information
+on the server and &ldquo;replay&rdquo; the messages back to clients that are joining. This
+works well in practice and saved a lot of development time, but it&rsquo;s a fairly
+inefficient method of handling the problem. If I were to refactor the project,
+I would work on trying to share/update something similar to the game&rsquo;s
+&ldquo;root&rdquo; object tree for this kind of data.</p>
+
+<p>I treat most game progression (unlocked research, data logs, equipment) as
+individual progression. Player data is synchronized and saved on the server
+as you would expect.</p>
+
+<h3 id="base-building">Base Building</h3>
+
+<p><img src="../../img/subnautica_building.jpg" alt="Base Building" /></p>
+
+<p>This was the hardest to get working right between the clients. In hindsight,
+all of the problems associated with synchronizing base building could have been
+solved by doing a full serialize/sync with the associated base after any
+construction event, even if this inefficient bandwidth-wise.</p>
+
+<p>The way the building currently works is loosely based on existing work by
+the Nitrox team &ndash; when a player builds or modifies a base piece, it&rsquo;s
+simulated across all clients.</p>
+
+<p>The first problem was with piece rotation. To have the pieces rotated the
+same across each client, a unique patch to the game&rsquo;s code for each
+type was required. If the game adds any new types of pieces in the future,
+more work be required to support them.</p>
+
+<p>The second problem is due to synchronization and replay. When deconstructing
+a base piece, a new object is typically spawned in its place. Knowing which
+object is replaced is tricky, and the server doesn&rsquo;t have knowledge of the
+base structure itself &ndash; which means any base modification must be stored
+and replayed to a client on connection. Since events can be received
+in a single frame, problems arise with base pieces getting blocked by
+pieces that would be considered gone on the next frame after Unity has
+processed the destruction event. This typically only happened with
+window / reinforcement pieces, and required additional patches
+to support.</p>
+
+<p>It was fairly easy to synchronize missing functionality with these
+problems fixed &ndash; most of these base pieces are just glorified item
+containers, and require only the addition of sharing a container GUID
+during creation.</p>
+
+<h3 id="vehicles">Vehicles</h3>
+
+<p><img src="../../img/subnautica_cyclops.jpg" alt="Cyclops" /></p>
+
+<p>All vehicles have synchronized upgrades, inventories and health. The Prawn Suit
+was one of the vehicles I had the most fun with in the main game, so I put extra
+work into making sure all of its animations and events work the same as in
+single player. Attacking with the arms, grappling, drilling and the walking
+animations are all fully functional and synced between clients.</p>
+
+<p><img src="../../img/subnautica_docking.jpg" alt="Docking" /></p>
+
+<p>The Cyclops submarine is a fairly complex and large mobile base in Subnautica.
+I&rsquo;ve implemented most of the &ldquo;fun&rdquo; functionality for it &ndash; lights, horns,
+engine state, docking, building all worked mostly as you&rsquo;d expect. Synchronized
+leaks and fires are something that I would have liked to add, but never got around
+to.</p>
+
+<h3 id="physics-synchronization">Physics Synchronization</h3>
+
+<p>Proper interpolation and synchronization of game objects is a topic on its
+on that I plan to write about in the future. In Nitrox, most objects
+continuously interpolated towards their real position but would never reach it.
+Vehicles were mishandled by relying on PhysX to be deterministic
+(it&rsquo;s not) with velocity simulation &ndash; in my tests, vehicle position
+would drift by many meters over time.</p>
+
+<p>In Shinkai, players and player controlled vehicles are interpolated towards
+their last received position from the server at a dynamic rate. The rate is
+determined by a calculated packet update frequency and latency. To keep
+things smooth if packets are dropped or late, limited extrapolation is allowed
+when the interpolation deadline expires.</p>
+
+<p>Players can push around items and unmanned vehicles in Nitrox, so I wanted
+to synchronize those too. Since these are typically very slow moving, I
+rely on the client&rsquo;s physics simulation to keep them in roughly the same
+place. Whenever they stray too far away from their last updated position,
+the player notifies the server of the new location. While saving bandwidth
+with nice, this also lets any client interact and push these
+objects.</p>
+
+<h3 id="release-and-future-support">Release and Future Support</h3>
+
+<p>Having played through the game multiple times alone and with friends, I
+think it&rsquo;s time to say goodbye to the world of Subnautica. The public
+release of Shinkai is not a fully engineered product, but a collection of
+ideas and concepts I tried when creating a playable experience for a close
+group of friends over a few weeks of programming in my free time.</p>
+
+<p>I&rsquo;m open to community contributions to the project, but I think they would be
+better forward towards the development of Nitrox &ndash; the project that sparked
+my interest in developing Shinkai.</p>
+</article>
+</main>
+<footer class="site-footer">
+    <hr/>
+    &copy; 2018 nkga
+</footer>
+</div>
+</body>
+</html>

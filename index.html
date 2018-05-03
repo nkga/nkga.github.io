@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>nkga blog | nkga blog</title>
+  <link rel="stylesheet" href="./css/style.css" />
+</head>
+<body>
+<header class="site-header" role="banner">
+    <div class="wrapper">
+  <a class="site-title" rel="author" href="http://localhost:1313/">nkga blog</a>
+  <nav class="site-nav">
+    <a class="site-link" href="./post">posts</a>
+    <a class="site-link" href="./about">about</a>
+  </nav>
+</div>
+</header>
+<div class="wrapper">
+<main class="page-content" aria-label="Content">
+
+
+    <article>
+    <h1 class="post-title"><a href="./post/shinkai-a-subnautica-multiplayer-mod/">Shinkai: A Subnautica Multiplayer Mod</a></h1>
+    <p class="post-meta">Posted on 2018/05/01</p>
+    <p><img src="./img/subnautica_players.jpg" alt="Subnautica Multiplayer" /></p>
+
+<p>Shinkai (深海) is a multiplayer mod for
+the game <a href="https://store.steampowered.com/app/264710/Subnautica/">Subnautica</a>.
+It is open source and available on <a href="https://github.com/nkga/shinkai">GitHub</a>.</p>
+
+<p>The mod was tested on the March update of the game (Update 84), but it seems to work
+with the April build as well. I have personally verified that the game was playable
+from beginning to completion with 3 friends online, but there isn&rsquo;t any explicit limit.
+As far as a feature list goes, most of the single player experience carries over
+to multiplayer the way you would expect it to.</p>
+
+<p>Notes on development of the mod and its challenges follow below.
+</p>
+    
+    <p><a href="./post/shinkai-a-subnautica-multiplayer-mod/">Continue reading &nbsp;&raquo;</a></p>
+    
+</article>
+
+
+    <article>
+    <h1 class="post-title"><a href="./post/frame-pacing-analysis-of-the-game-loop/">Frame Pacing: Analysis of the Game Loop</a></h1>
+    <p class="post-meta">Posted on 2018/04/22</p>
+    <p><img src="./img/msvc_frametime_analysis.png" alt="Frame Pacing Analysis" /></p>
+
+<p>The graph above was generated from Visual Studio&rsquo;s performance profiler on a custom
+game engine. It illustrates the time taken to render each frame, in milliseconds.
+From the 7282 frames that were rendered during this collection period, there were
+only 36 that did not take exactly 16667μs (60FPS target framerate). Of these 36,
+the largest difference was only 88μs.</p>
+
+<p>Frame pacing is the consistency of frame-times for rendered frames in your engine.
+If you want your game to feel &ldquo;smooth&rdquo; or &ldquo;fluid&rdquo;, you should aim to have consistent
+frame pacing like the graph above. In this article, I&rsquo;ll be walking you through
+the low level details that you can implement in your own engine.
+</p>
+    
+    <p><a href="./post/frame-pacing-analysis-of-the-game-loop/">Continue reading &nbsp;&raquo;</a></p>
+    
+</article>
+
+
+    <article>
+    <h1 class="post-title"><a href="./post/video-playback-for-games-with-vp9/">Video Playback for Games with VP9</a></h1>
+    <p class="post-meta">Posted on 2018/04/14</p>
+    <p>When working on porting an older PC game to a modern version of Windows I
+needed play its prerecorded videos in-game. Commercial engines (Unity, UE4)
+include this functionality, and there are also standalone solutions
+<a href="www.radgametools.com/bink">Bink</a> that can work for a custom engine. I wasn&rsquo;t
+interested in licensing a commercial product, so I developed my own video player.
+</p>
+    
+    <p><a href="./post/video-playback-for-games-with-vp9/">Continue reading &nbsp;&raquo;</a></p>
+    
+</article>
+
+
+<nav class="site-paginator">
+    <p>
+        
+        <span>Page 1 of 1</span>
+        
+    </p>
+</nav>
+
+</main>
+<footer class="site-footer">
+    <hr/>
+    &copy; 2018 nkga
+</footer>
+</div>
+</body>
+</html>

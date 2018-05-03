@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Frame Pacing: Analysis of the Game Loop | nkga blog</title>
+  <link rel="stylesheet" href="../../css/style.css" />
+</head>
+<body>
+<header class="site-header" role="banner">
+    <div class="wrapper">
+  <a class="site-title" rel="author" href="http://localhost:1313/">nkga blog</a>
+  <nav class="site-nav">
+    <a class="site-link" href="../../post">posts</a>
+    <a class="site-link" href="../../about">about</a>
+  </nav>
+</div>
+</header>
+<div class="wrapper">
+<main class="page-content" aria-label="Content">
+
+<article>
+    <h1 class="post-title">Frame Pacing: Analysis of the Game Loop</h1>
+    <p class="post-meta">Posted on 2018/04/22</p>
+    <p><img src="../../img/msvc_frametime_analysis.png" alt="Frame Pacing Analysis" /></p>
+
+<p>The graph above was generated from Visual Studio&rsquo;s performance profiler on a custom
+game engine. It illustrates the time taken to render each frame, in milliseconds.
+From the 7282 frames that were rendered during this collection period, there were
+only 36 that did not take exactly 16667μs (60FPS target framerate). Of these 36,
+the largest difference was only 88μs.</p>
+
+<p>Frame pacing is the consistency of frame-times for rendered frames in your engine.
+If you want your game to feel &ldquo;smooth&rdquo; or &ldquo;fluid&rdquo;, you should aim to have consistent
+frame pacing like the graph above. In this article, I&rsquo;ll be walking you through
+the low level details that you can implement in your own engine.
+</p>
+
+<h3 id="high-resolution-timing">High Resolution Timing</h3>
+
+<p>On Windows you should already be making use of <a href="https://msdn.microsoft.com/en-us/library/windows/desktop/ms644904(v=vs.85).aspx"><code>QueryPerformanceCounter</code></a> and
+<a href="https://msdn.microsoft.com/en-us/library/windows/desktop/ms644905(v=vs.85).aspx"><code>QueryPerformanceFrequency</code></a>. Processors can change frequency based on power
+state, and on Windows 7 and later, these provide a guaranteed 1μs resolution
+time stamp. Example usage of these APIs (without caching frequency):</p>
+<div class="highlight"><pre class="chroma"><code class="language-c++" data-lang="c++"><span class="c1">// Returns the current time in microseconds.
+</span><span class="c1"></span><span class="n">int64_t</span> <span class="nf">timer_query_us</span><span class="p">()</span> <span class="p">{</span>
+    <span class="n">LARGE_INTEGER</span> <span class="n">tick</span><span class="p">,</span> <span class="n">freq</span><span class="p">;</span>
+    <span class="n">QueryPerformanceFrequency</span><span class="p">(</span><span class="o">&amp;</span><span class="n">freq</span><span class="p">);</span>
+    <span class="n">QueryPerformanceCounter</span><span class="p">(</span><span class="o">&amp;</span><span class="n">tick</span><span class="p">);</span>
+    <span class="k">return</span> <span class="p">(</span><span class="n">tick</span><span class="p">.</span><span class="n">QuadPart</span> <span class="o">*</span> <span class="mi">1000000ll</span><span class="p">)</span> <span class="o">/</span> <span class="n">freq</span><span class="p">.</span><span class="n">QuadPart</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>So we can measure time correctly, next is controlling it.</p>
+
+<h3 id="burning-time">Burning Time</h3>
+
+<p>While most modern games are probably using extra CPU cycles for something useful,
+if you have time to spare before your next frame, you&rsquo;ll need to wait it out. The
+simplest method, but most inefficient, is the busy loop:</p>
+<div class="highlight"><pre class="chroma"><code class="language-c++" data-lang="c++"><span class="kt">void</span> <span class="nf">timer_limit</span><span class="p">(</span><span class="n">i64</span> <span class="n">us_prev</span><span class="p">,</span> <span class="n">i64</span> <span class="n">us_target</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">for</span> <span class="p">(;;)</span> <span class="p">{</span>
+        <span class="n">i64</span> <span class="n">us_now</span> <span class="o">=</span> <span class="n">timer_query_us</span><span class="p">();</span>
+        <span class="n">i64</span> <span class="n">us_diff</span> <span class="o">=</span> <span class="p">(</span><span class="n">us_now</span> <span class="o">-</span> <span class="n">us_prev</span><span class="p">);</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">us_diff</span> <span class="o">&gt;=</span> <span class="n">us_target</span><span class="p">)</span> <span class="p">{</span>
+            <span class="k">break</span><span class="p">;</span>
+        <span class="p">}</span>
+
+        <span class="n">YieldProcessor</span><span class="p">();</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>The added twist here is the use of <a href="https://msdn.microsoft.com/en-us/library/windows/desktop/ms687419(v=vs.85).aspx"><code>YieldProcessor</code></a>,
+which makes use of the <a href="https://software.intel.com/sites/landingpage/IntrinsicsGuide/#text=_mm_pause&amp;expand=3884"><code>_mm_pause</code></a>
+intrinsic to help with power efficiency even while we&rsquo;re burning cycles. But we can do better
+than this by utilizing an actual <a href="https://msdn.microsoft.com/en-us/library/windows/desktop/ms686298(v=vs.85).aspx"><code>Sleep</code></a>. Like
+the documentation suggests, if we want predictable behavior across all power states,
+you need to make use of <a href="https://msdn.microsoft.com/en-us/library/windows/desktop/dd757624(v=vs.85).aspx"><code>timeBeginPeriod</code></a>.</p>
+
+<h3 id="sleeping-time">Sleeping Time</h3>
+<div class="highlight"><pre class="chroma"><code class="language-c++" data-lang="c++"><span class="k">struct</span> <span class="n">timer_t</span> <span class="p">{</span>
+    <span class="n">timer_t</span><span class="p">();</span>
+    <span class="o">~</span><span class="n">timer_t</span><span class="p">();</span>
+
+    <span class="kt">void</span> <span class="nf">limit</span><span class="p">(</span><span class="n">int64_t</span> <span class="n">us_target</span><span class="p">);</span>
+    <span class="n">int64_t</span> <span class="nf">query</span><span class="p">();</span>
+
+<span class="k">protected</span><span class="o">:</span>
+    <span class="kt">void</span> <span class="n">sleep</span><span class="p">(</span><span class="n">uint32_t</span> <span class="n">ms</span><span class="p">);</span>
+
+    <span class="n">LARGE_INTEGER</span> <span class="n">freq</span><span class="p">;</span>
+    <span class="n">int64_t</span> <span class="n">us_start</span><span class="p">;</span>
+    <span class="n">int64_t</span> <span class="n">us_prev</span><span class="p">;</span>
+<span class="p">};</span>
+
+<span class="n">timer_t</span><span class="o">::</span><span class="n">timer_t</span><span class="p">()</span> <span class="p">{</span>
+    <span class="n">timeBeginPeriod</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span>
+    <span class="n">QueryPerformanceFrequency</span><span class="p">(</span><span class="o">&amp;</span><span class="n">freq</span><span class="p">);</span>
+
+    <span class="n">us_start</span> <span class="o">=</span> <span class="n">query</span><span class="p">();</span>
+    <span class="n">us_prev</span> <span class="o">=</span> <span class="n">us_start</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="n">timer_t</span><span class="o">::~</span><span class="n">timer_t</span><span class="p">()</span> <span class="p">{</span>
+    <span class="n">timeEndPeriod</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="kt">void</span> <span class="n">timer_t</span><span class="o">::</span><span class="n">limit</span><span class="p">(</span><span class="n">int64_t</span> <span class="n">us_target</span><span class="p">)</span> <span class="p">{</span>
+    <span class="n">int64_t</span> <span class="n">us_now</span> <span class="o">=</span> <span class="n">query</span><span class="p">();</span>
+
+    <span class="k">if</span> <span class="p">(</span><span class="n">us_target</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+        <span class="k">for</span> <span class="p">(;;)</span> <span class="p">{</span>
+            <span class="n">us_now</span> <span class="o">=</span> <span class="n">query</span><span class="p">();</span>
+
+            <span class="n">int64_t</span> <span class="n">us_diff</span> <span class="o">=</span> <span class="p">(</span><span class="n">us_now</span> <span class="o">-</span> <span class="n">us_prev</span><span class="p">);</span>
+            <span class="k">if</span> <span class="p">(</span><span class="n">us_diff</span> <span class="o">&gt;=</span> <span class="n">us_target</span><span class="p">)</span> <span class="p">{</span>
+                <span class="k">break</span><span class="p">;</span>
+            <span class="p">}</span>
+
+            <span class="n">int64_t</span> <span class="n">us_sleep</span> <span class="o">=</span> <span class="p">(</span><span class="n">us_target</span> <span class="o">-</span> <span class="n">us_diff</span><span class="p">);</span>
+            <span class="k">if</span> <span class="p">(</span><span class="n">us_sleep</span> <span class="o">&gt;</span> <span class="mi">2000</span><span class="p">)</span> <span class="p">{</span>
+                <span class="n">uint32_t</span> <span class="n">ms</span> <span class="o">=</span> <span class="p">(</span><span class="n">us_sleep</span> <span class="o">-</span> <span class="mi">2000</span><span class="p">)</span> <span class="o">/</span> <span class="mi">1000</span><span class="p">;</span>
+                <span class="n">sleep</span><span class="p">(</span><span class="n">ms</span><span class="p">);</span>
+            <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+                <span class="n">sleep</span><span class="p">(</span><span class="mi">0</span><span class="p">);</span>
+            <span class="p">}</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+
+    <span class="n">us_prev</span> <span class="o">=</span> <span class="n">us_now</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="n">int64_t</span> <span class="n">timer_t</span><span class="o">::</span><span class="n">query</span><span class="p">()</span> <span class="p">{</span>
+    <span class="n">LARGE_INTEGER</span> <span class="n">tick</span><span class="p">;</span>
+    <span class="n">QueryPerformanceCounter</span><span class="p">(</span><span class="o">&amp;</span><span class="n">tick</span><span class="p">);</span>
+    <span class="k">return</span> <span class="p">(</span><span class="n">tick</span><span class="p">.</span><span class="n">QuadPart</span> <span class="o">*</span> <span class="mi">1000000ll</span><span class="p">)</span> <span class="o">/</span> <span class="n">freq</span><span class="p">.</span><span class="n">QuadPart</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="kt">void</span> <span class="n">timer_t</span><span class="o">::</span><span class="n">sleep</span><span class="p">(</span><span class="n">uint32_t</span> <span class="n">ms</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">ms</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">YieldProcessor</span><span class="p">();</span>
+    <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+        <span class="n">Sleep</span><span class="p">(</span><span class="n">ms</span><span class="p">);</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>The above combines everything discussed above. The timer has been made into
+a class to deal with setting/restoring the timer frequency (since it&rsquo;s a global
+setting on Windows), and so that we can cache the frequency and save a few hundred
+cycles from calling into the kernel an extra time for each query.</p>
+
+<p>Since the Sleep only has roughly a resolution of 1ms, I reverse a buffer of 2ms from the target frametime that
+is just spent busy looping with YieldProcessor. The result is consistent frame pacing with low CPU usage for
+games that have cycles to spare.</p>
+
+<h3 id="vertical-sync">Vertical Sync</h3>
+
+<p>Controlling frametime using V-sync mostly works. In my experience, most frames
+will be within 500μs of the monitor&rsquo;s target refresh rate. The variation isn&rsquo;t too
+noticeable as long as you consistently spike above it with long running tasks (double buffer setup, standard on PC). But if your application is running
+under the Windows compositor, using V-sync can add some unfortunate latency to your
+game:</p>
+
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th align="center">V-Sync</th>
+<th align="right">Latency</th>
+</tr>
+</thead>
+
+<tbody>
+<tr>
+<td>Composited</td>
+<td align="center">Off</td>
+<td align="right">22.32ms</td>
+</tr>
+
+<tr>
+<td>Composited</td>
+<td align="center">On</td>
+<td align="right">49.10ms</td>
+</tr>
+
+<tr>
+<td>Exclusive</td>
+<td align="center">Off</td>
+<td align="right">3.42ms</td>
+</tr>
+
+<tr>
+<td>Exclusive</td>
+<td align="center">On</td>
+<td align="right">66.38ms</td>
+</tr>
+</tbody>
+</table>
+
+<p>The data for the table are averages derived from <a href="https://github.com/GameTechDev/PresentMon">PresentMon</a> reports on a 60Hz monitor.</p>
+
+<h3 id="the-game-loop">The Game Loop</h3>
+
+<p>With a suitable method for both measuring and controlling the framerate, we
+can provide the game loop with correct timing information at a consistent pace.
+As a preface, <a href="https://randomascii.wordpress.com/2012/02/13/dont-store-that-in-a-float/">don&rsquo;t store time in a float</a>. If
+you need to work in seconds, use a double. This is
+something that even commercial engines like Unity <a href="https://docs.unity3d.com/ScriptReference/Time-time.html">still don&rsquo;t get right</a>.</p>
+<div class="highlight"><pre class="chroma"><code class="language-c++" data-lang="c++"><span class="kt">void</span> <span class="nf">game_loop</span><span class="p">()</span> <span class="p">{</span>
+    <span class="c1">// startup...
+</span><span class="c1"></span>
+    <span class="k">constexpr</span> <span class="n">int64_t</span> <span class="n">tick_rate</span> <span class="o">=</span> <span class="mi">16667</span><span class="p">;</span>
+    <span class="k">constexpr</span> <span class="kt">double</span> <span class="n">dt_fixed</span> <span class="o">=</span> <span class="n">tick_rate</span> <span class="o">/</span> <span class="mf">1000000.0</span><span class="p">;</span>
+
+    <span class="n">int64_t</span> <span class="n">tick_frame</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+    <span class="n">int64_t</span> <span class="n">us_prev</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+
+    <span class="k">while</span> <span class="p">(</span><span class="n">running</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">int64_t</span> <span class="n">us_now</span> <span class="o">=</span> <span class="n">timer</span><span class="p">.</span><span class="n">query</span><span class="p">();</span>
+
+        <span class="c1">// update input related subsystems...
+</span><span class="c1"></span>        <span class="c1">// window.update();
+</span><span class="c1"></span>        <span class="c1">// gamepad.update();
+</span><span class="c1"></span>        <span class="c1">// etc...
+</span><span class="c1"></span>
+        <span class="c1">// determine the tick we&#39;re allowed to run up to
+</span><span class="c1"></span>        <span class="n">int64_t</span> <span class="n">tick_last</span> <span class="o">=</span> <span class="n">us_now</span> <span class="o">/</span> <span class="n">tick_rate</span><span class="p">;</span>
+
+        <span class="k">for</span> <span class="p">(;</span> <span class="n">tick_frame</span> <span class="o">&lt;</span> <span class="n">tick_last</span><span class="p">;</span> <span class="o">++</span><span class="n">tick_frame</span><span class="p">)</span> <span class="p">{</span>
+            <span class="c1">// update game state that&#39;s dependent on tickrate, like physics
+</span><span class="c1"></span>            <span class="n">game</span><span class="p">.</span><span class="n">fixed_update</span><span class="p">(</span><span class="n">dt_fixed</span><span class="p">);</span>
+        <span class="p">}</span>
+
+        <span class="c1">// calculate real delta time
+</span><span class="c1"></span>        <span class="n">int64_t</span> <span class="n">us_delta</span> <span class="o">=</span> <span class="n">us_now</span> <span class="o">-</span> <span class="n">us_prev</span><span class="p">;</span>
+        <span class="n">us_prev</span> <span class="o">=</span> <span class="n">us_now</span><span class="p">;</span>
+
+        <span class="kt">double</span> <span class="n">dt</span> <span class="o">=</span> <span class="n">us_delta</span> <span class="o">/</span> <span class="mf">1000000.0</span><span class="p">;</span>
+
+        <span class="c1">// update game state that isn&#39;t tied to tickrate
+</span><span class="c1"></span>        <span class="n">game</span><span class="p">.</span><span class="n">update</span><span class="p">(</span><span class="n">dt</span><span class="p">);</span>
+
+        <span class="c1">// calculate the interpolation factor
+</span><span class="c1"></span>        <span class="n">int64_t</span> <span class="n">us_interp</span> <span class="o">=</span> <span class="n">us_now</span> <span class="o">-</span> <span class="p">(</span><span class="n">tick_frame</span> <span class="o">*</span> <span class="n">tick_rate</span><span class="p">);</span>
+        <span class="kt">double</span> <span class="n">interp</span> <span class="o">=</span> <span class="n">us_interp</span> <span class="o">/</span> <span class="p">(</span><span class="kt">double</span><span class="p">)</span><span class="n">tick_rate</span><span class="p">;</span>
+
+        <span class="c1">// render the world - be careful...
+</span><span class="c1"></span>        <span class="n">game</span><span class="p">.</span><span class="n">render</span><span class="p">(</span><span class="n">dt</span><span class="p">,</span> <span class="n">interp</span><span class="p">);</span>
+
+        <span class="c1">// render the frame...
+</span><span class="c1"></span>        <span class="c1">// render.present();
+</span><span class="c1"></span>
+        <span class="n">timer</span><span class="p">.</span><span class="n">limit</span><span class="p">();</span>
+    <span class="p">}</span>
+
+    <span class="c1">// cleanup...
+</span><span class="c1"></span><span class="p">}</span>
+</code></pre></div>
+<p>Unlike the previous code samples, this one is a little more &ldquo;abstract&rdquo;. This implements
+a game loop for a mixed variable/fixed timestep like the one Unity has. There are
+<a href="https://gafferongames.com/post/fix_your_timestep/">good reasons</a> to have physics on
+a fixed timestep, but also to leave elements that don&rsquo;t depend on frame timing (like the GUI)
+on a variable timestep for performance.</p>
+
+<p>The first and last functions in your game loop should be related to timing information - you
+can even merge these into one function if you want. That way, variation in updating
+input related subsystems won&rsquo;t affect timing information for your game loop.</p>
+
+<p>The next point of interest is using the real query time instead of an accumulator. This may seem like a minor point, but it&rsquo;s important to help prevent &ldquo;tick drift&rdquo; from occurring
+during longer play sessions.</p>
+
+<p>Like any fixed timestep implementation, you should be interpolating between the game&rsquo;s
+previous state and current state for physically based entities. This is critical for
+ensuring your game entities look smooth when entities are moving around.</p>
+
+<h3 id="fixed-update-rate">Fixed Update Rate</h3>
+
+<p>The target frametime really matters when it comes to monitors that are only 60Hz. You should
+be choosing your fixed update rate with a frametime value that matches your refresh rate, like 16667μs.
+For example, targeting a frametime of 10000μs (increasing the fixed update rate) is something you
+should avoid. The fixed update will frequently tick twice during a single frame,
+but not consistently. Consistency is key.</p>
+
+<h3 id="closing-thoughts">Closing Thoughts</h3>
+
+<p>Control the rate at which frames render in your engine. Picking the target frametime for
+both rendering and your fixed updates is important, and you should be profiling
+your application to ensure it achieves them.</p>
+
+<p>This is something that <a href="https://www.eurogamer.net/articles/digitalfoundry-2014-frame-rate-vs-frame-pacing">consumers care about</a>, and will feel while playing your game.</p>
+</article>
+</main>
+<footer class="site-footer">
+    <hr/>
+    &copy; 2018 nkga
+</footer>
+</div>
+</body>
+</html>

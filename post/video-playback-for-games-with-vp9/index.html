@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Video Playback for Games with VP9 | nkga blog</title>
+  <link rel="stylesheet" href="../../css/style.css" />
+</head>
+<body>
+<header class="site-header" role="banner">
+    <div class="wrapper">
+  <a class="site-title" rel="author" href="http://localhost:1313/">nkga blog</a>
+  <nav class="site-nav">
+    <a class="site-link" href="../../post">posts</a>
+    <a class="site-link" href="../../about">about</a>
+  </nav>
+</div>
+</header>
+<div class="wrapper">
+<main class="page-content" aria-label="Content">
+
+<article>
+    <h1 class="post-title">Video Playback for Games with VP9</h1>
+    <p class="post-meta">Posted on 2018/04/14</p>
+    <p>When working on porting an older PC game to a modern version of Windows I
+needed play its prerecorded videos in-game. Commercial engines (Unity, UE4)
+include this functionality, and there are also standalone solutions
+<a href="www.radgametools.com/bink">Bink</a> that can work for a custom engine. I wasn&rsquo;t
+interested in licensing a commercial product, so I developed my own video player.
+</p>
+
+<h3 id="why-vp9">Why VP9?</h3>
+
+<p>The reference implementation, <a href="https://www.webmproject.org/">libvpx</a>, is great:</p>
+
+<ul>
+<li>Decode speed, video quality, video size (<a href="https://blogs.gnome.org/rbultje/2015/09/28/vp9-encodingdecoding-performance-vs-hevch-264/">source</a>)</li>
+<li>Good examples and documentation (<a href="https://github.com/webmproject/libvpx/blob/master/examples/simple_decoder.c">example</a>)</li>
+<li>API that doesn&rsquo;t control execution flow or I/O</li>
+<li>Small binary footprint (~200KB from the decoder)</li>
+<li>Free license</li>
+</ul>
+
+<p>FFmpeg or Microsoft&rsquo;s Media Foundation are the only real alternatives here on
+Windows, but they have poorly designed APIs with unattractive licenses.</p>
+
+<h3 id="vp9-format-and-theory">VP9 Format and Theory</h3>
+
+<p>To get a video file we can work with, take whatever sample
+video you like and re-encode it to VP9 in the <a href="https://wiki.multimedia.cx/index.php/IVF">IVF</a> container.
+I use <a href="https://trac.ffmpeg.org/wiki/Encode/VP9">FFmpeg</a> to take care of this:</p>
+
+<pre><code>ffmpeg -i input.mp4 -c:v libvpx-vp9 -b:v 2M output.ivf
+</code></pre>
+
+<p>The resulting binary data consists of a header:</p>
+
+<pre><code>bytes 0-3    signature: 'DKIF'
+bytes 4-5    version (should be 0)
+bytes 6-7    length of header in bytes
+bytes 8-11   codec FourCC (e.g., 'VP80')
+bytes 12-13  width in pixels
+bytes 14-15  height in pixels
+bytes 16-19  frame rate
+bytes 20-23  time scale
+bytes 24-27  number of frames in file
+bytes 28-31  unused
+</code></pre>
+
+<p>&hellip;and a sequence of frames:</p>
+
+<pre><code>bytes 0-3    size of frame in bytes (not including the 12-byte header)
+bytes 4-11   64-bit presentation timestamp
+bytes 12..   frame data
+</code></pre>
+
+<p>Each frame can either be an i-frame or a p-frame. The i-frame contains
+the full image data for a frame and doesn&rsquo;t depend on any previous
+decoder state. The p-frame contains transformation data that is applied
+to a previous i-frame or p-frame. Typically you have an i-frame every
+few seconds, followed by many p-frames.</p>
+
+<p><img src="../../img/vp9_frame_types.png" alt="VP9 Frame Types" /></p>
+
+<p>Each of these frames contains <a href="https://en.wikipedia.org/wiki/YUV">YUV</a>
+data instead of typical RGB data you&rsquo;d find in an image.
+The benefit for this format is you only need to store a full resolution
+version of the Y (luma) channel. The UV (chrominance) components
+can be stored at half the native resolution.</p>
+
+<h3 id="parsing-the-ivf">Parsing the IVF</h3>
+
+<p>Following the <a href="https://wiki.multimedia.cx/index.php/IVF">specification</a>:</p>
+<div class="highlight"><pre class="chroma"><code class="language-c++" data-lang="c++"><span class="cp">#include</span> <span class="cpf">&lt;vpx/vp8dx.h&gt;</span><span class="cp">
+</span><span class="cp">#include</span> <span class="cpf">&lt;vpx/vpx_decoder.h&gt;</span><span class="cp">
+</span><span class="cp">#include</span> <span class="cpf">&lt;vpx/vpx_image.h&gt;</span><span class="cp">
+</span><span class="cp">#include</span> <span class="cpf">&lt;stdlib.h&gt;</span><span class="cp">
+</span><span class="cp">#include</span> <span class="cpf">&lt;stdint.h&gt;</span><span class="cp">
+</span><span class="cp">#include</span> <span class="cpf">&lt;string.h&gt;</span><span class="cp">
+</span><span class="cp"></span>
+<span class="cp">#pragma pack(push, 1)
+</span><span class="cp"></span><span class="k">struct</span> <span class="n">ivf_header_t</span> <span class="p">{</span>
+    <span class="n">uint32_t</span> <span class="n">signature</span><span class="p">;</span>
+    <span class="n">uint16_t</span> <span class="n">version</span><span class="p">;</span>
+    <span class="n">uint16_t</span> <span class="n">length</span><span class="p">;</span>
+    <span class="n">uint32_t</span> <span class="n">codec</span><span class="p">;</span>
+    <span class="n">uint16_t</span> <span class="n">width</span><span class="p">;</span>
+    <span class="n">uint16_t</span> <span class="n">height</span><span class="p">;</span>
+    <span class="n">uint32_t</span> <span class="n">framerate</span><span class="p">;</span>
+    <span class="n">uint32_t</span> <span class="n">timescale</span><span class="p">;</span>
+    <span class="n">uint32_t</span> <span class="n">num_frames</span><span class="p">;</span>
+    <span class="n">uint32_t</span> <span class="n">unused</span><span class="p">;</span>
+<span class="p">};</span>
+<span class="cp">#pragma pack(pop)
+</span><span class="cp"></span>
+<span class="k">struct</span> <span class="n">video_frame_t</span> <span class="p">{</span>
+    <span class="n">uint32_t</span> <span class="n">pos</span><span class="p">;</span>
+    <span class="n">uint32_t</span> <span class="n">bytes</span><span class="p">;</span>
+    <span class="n">uint8_t</span> <span class="n">kf</span><span class="p">;</span>
+<span class="p">};</span>
+
+<span class="k">struct</span> <span class="n">video_t</span> <span class="p">{</span>
+    <span class="n">uint8_t</span><span class="o">*</span> <span class="n">src</span><span class="p">;</span>
+    <span class="n">video_frame_t</span><span class="o">*</span> <span class="n">frames</span><span class="p">;</span>
+    <span class="n">uint32_t</span> <span class="n">frame_count</span><span class="p">;</span>
+    <span class="n">uint32_t</span> <span class="n">us_frame_duration</span><span class="p">;</span>
+    <span class="n">uint32_t</span> <span class="n">us_video_duration</span><span class="p">;</span>
+<span class="p">};</span>
+
+<span class="kt">bool</span> <span class="nf">load_video</span><span class="p">(</span><span class="n">video_t</span><span class="o">*</span> <span class="n">ivf</span><span class="p">,</span> <span class="n">uint8_t</span><span class="o">*</span> <span class="n">src</span><span class="p">,</span> <span class="n">uint32_t</span> <span class="n">src_bytes</span><span class="p">)</span> <span class="p">{</span>
+    <span class="n">memset</span><span class="p">(</span><span class="n">ivf</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="o">*</span><span class="n">ivf</span><span class="p">));</span>
+
+    <span class="k">if</span> <span class="p">(</span><span class="n">src</span> <span class="o">==</span> <span class="k">nullptr</span> <span class="o">||</span> <span class="n">src_bytes</span> <span class="o">&lt;=</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">ivf_header_t</span><span class="p">))</span> <span class="p">{</span>
+        <span class="k">return</span> <span class="nb">false</span><span class="p">;</span>
+    <span class="p">}</span>
+
+    <span class="k">auto</span> <span class="n">header</span> <span class="o">=</span> <span class="o">*</span><span class="p">(</span><span class="n">ivf_header_t</span><span class="o">*</span><span class="p">)</span><span class="n">src</span><span class="p">;</span>
+
+    <span class="n">uint32_t</span> <span class="k">const</span> <span class="n">signature</span> <span class="o">=</span> <span class="mh">0x30395056</span><span class="p">;</span>
+
+    <span class="k">if</span> <span class="p">(</span><span class="n">header</span><span class="p">.</span><span class="n">codec</span> <span class="o">!=</span> <span class="n">signature</span> <span class="o">||</span> <span class="n">header</span><span class="p">.</span><span class="n">framerate</span> <span class="o">==</span> <span class="mi">0</span> <span class="o">||</span> <span class="n">header</span><span class="p">.</span><span class="n">num_frames</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+        <span class="k">return</span> <span class="nb">false</span><span class="p">;</span>
+    <span class="p">}</span>
+
+    <span class="n">ivf</span><span class="o">-&gt;</span><span class="n">frames</span> <span class="o">=</span> <span class="p">(</span><span class="n">video_frame_t</span><span class="o">*</span><span class="p">)</span><span class="n">calloc</span><span class="p">(</span><span class="n">header</span><span class="p">.</span><span class="n">num_frames</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">video_frame_t</span><span class="p">));</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">ivf</span><span class="o">-&gt;</span><span class="n">frames</span> <span class="o">==</span> <span class="k">nullptr</span><span class="p">)</span> <span class="p">{</span>
+        <span class="k">return</span> <span class="nb">false</span><span class="p">;</span>
+    <span class="p">}</span>
+
+    <span class="n">uint32_t</span> <span class="n">num_frames</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+    <span class="n">uint32_t</span> <span class="n">data_pos</span> <span class="o">=</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">ivf_header_t</span><span class="p">);</span>
+    <span class="n">uint32_t</span> <span class="n">data_end</span> <span class="o">=</span> <span class="n">src_bytes</span> <span class="o">-</span> <span class="mi">12</span><span class="p">;</span>
+
+    <span class="k">for</span> <span class="p">(;;)</span> <span class="p">{</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">data_pos</span> <span class="o">&gt;=</span> <span class="n">data_end</span><span class="p">)</span> <span class="p">{</span>
+            <span class="k">break</span><span class="p">;</span>
+        <span class="p">}</span>
+
+        <span class="k">auto</span> <span class="n">frame_bytes</span> <span class="o">=</span> <span class="o">*</span><span class="p">(</span><span class="n">uint32_t</span><span class="o">*</span><span class="p">)(</span><span class="n">src</span> <span class="o">+</span> <span class="n">data_pos</span><span class="p">);</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">data_pos</span> <span class="o">+</span> <span class="n">frame_bytes</span> <span class="o">&gt;</span> <span class="n">src_bytes</span><span class="p">)</span> <span class="p">{</span>
+            <span class="k">break</span><span class="p">;</span>
+        <span class="p">}</span>
+
+        <span class="n">data_pos</span> <span class="o">+=</span> <span class="mi">12</span><span class="p">;</span>
+
+        <span class="k">auto</span> <span class="n">frame</span> <span class="o">=</span> <span class="o">&amp;</span><span class="n">ivf</span><span class="o">-&gt;</span><span class="n">frames</span><span class="p">[</span><span class="n">num_frames</span><span class="o">++</span><span class="p">];</span>
+        <span class="n">frame</span><span class="o">-&gt;</span><span class="n">pos</span> <span class="o">=</span> <span class="n">data_pos</span><span class="p">;</span>
+        <span class="n">frame</span><span class="o">-&gt;</span><span class="n">bytes</span> <span class="o">=</span> <span class="n">frame_bytes</span><span class="p">;</span>
+
+        <span class="n">vpx_codec_stream_info_t</span> <span class="n">si</span><span class="p">;</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">vpx_codec_peek_stream_info</span><span class="p">(</span>
+            <span class="o">&amp;</span><span class="n">vpx_codec_vp9_dx_algo</span><span class="p">,</span>
+            <span class="n">src</span> <span class="o">+</span> <span class="n">data_pos</span><span class="p">,</span>
+            <span class="n">frame_bytes</span><span class="p">,</span>
+            <span class="o">&amp;</span><span class="n">si</span><span class="p">)</span> <span class="o">==</span> <span class="n">VPX_CODEC_OK</span><span class="p">)</span> <span class="p">{</span>
+
+            <span class="c1">// I-frames are also called &#34;key frames&#34;, or shortened to just kf.
+</span><span class="c1"></span>            <span class="n">frame</span><span class="o">-&gt;</span><span class="n">kf</span> <span class="o">=</span> <span class="n">si</span><span class="p">.</span><span class="n">is_kf</span><span class="p">;</span>
+        <span class="p">}</span>
+
+        <span class="n">data_pos</span> <span class="o">+=</span> <span class="n">frame_bytes</span><span class="p">;</span>
+
+        <span class="k">if</span> <span class="p">(</span><span class="n">num_frames</span> <span class="o">&gt;=</span> <span class="n">header</span><span class="p">.</span><span class="n">num_frames</span><span class="p">)</span> <span class="p">{</span>
+            <span class="k">break</span><span class="p">;</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+
+    <span class="n">ivf</span><span class="o">-&gt;</span><span class="n">frame_count</span> <span class="o">=</span> <span class="n">num_frames</span><span class="p">;</span>
+    <span class="n">ivf</span><span class="o">-&gt;</span><span class="n">us_frame_duration</span> <span class="o">=</span> <span class="p">(</span><span class="mi">1000000ll</span> <span class="o">/</span> <span class="n">header</span><span class="p">.</span><span class="n">framerate</span><span class="p">);</span>
+    <span class="n">ivf</span><span class="o">-&gt;</span><span class="n">us_video_duration</span> <span class="o">=</span> <span class="n">ivf</span><span class="o">-&gt;</span><span class="n">us_frame_duration</span> <span class="o">*</span> <span class="n">num_frames</span><span class="p">;</span>
+    <span class="n">ivf</span><span class="o">-&gt;</span><span class="n">src</span> <span class="o">=</span> <span class="n">src</span><span class="p">;</span>
+
+    <span class="k">return</span> <span class="nb">true</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>I make the assumption that the videos are going to be constant
+framerate, but if you really need to work with variable framerate data
+you can always read the timestamp from the frame metadata. I
+preprocess the video data in the parser to determine where the i-frames are in
+advance. This will help with video seeking during playback.</p>
+
+<h3 id="video-decoding">Video Decoding</h3>
+<div class="highlight"><pre class="chroma"><code class="language-c++" data-lang="c++"><span class="c1">// Returns the current time in microseconds.
+</span><span class="c1"></span><span class="n">int64_t</span> <span class="nf">timer_query</span><span class="p">();</span>
+
+<span class="c1">// Updates a render texture for a given plane.
+</span><span class="c1"></span><span class="kt">void</span> <span class="nf">render_update_plane</span><span class="p">(</span><span class="n">uint32_t</span> <span class="n">idx</span><span class="p">,</span> <span class="kt">void</span> <span class="k">const</span><span class="o">*</span> <span class="n">src</span><span class="p">,</span> <span class="n">uint32_t</span> <span class="n">stride</span><span class="p">,</span> <span class="n">uint32_t</span> <span class="n">w</span><span class="p">,</span> <span class="n">uint32_t</span> <span class="n">h</span><span class="p">);</span>
+
+<span class="k">struct</span> <span class="n">video_player_t</span> <span class="p">{</span>
+    <span class="n">video_player_t</span><span class="p">(</span><span class="n">int32_t</span> <span class="n">res</span><span class="p">,</span> <span class="n">int32_t</span> <span class="n">res_y</span><span class="p">);</span>
+    <span class="o">~</span><span class="n">video_player_t</span><span class="p">();</span>
+
+    <span class="kt">void</span> <span class="nf">load</span><span class="p">(</span><span class="n">video_t</span><span class="o">*</span> <span class="n">video_in</span><span class="p">);</span>
+    <span class="kt">void</span> <span class="nf">update</span><span class="p">(</span><span class="n">int64_t</span> <span class="n">us_time</span><span class="p">);</span>
+
+<span class="k">protected</span><span class="o">:</span>
+    <span class="k">static</span> <span class="n">int32_t</span> <span class="n">vpx_img_plane_width</span><span class="p">(</span><span class="k">const</span> <span class="n">vpx_image_t</span> <span class="o">*</span><span class="n">img</span><span class="p">,</span> <span class="n">int32_t</span> <span class="n">plane</span><span class="p">);</span>
+    <span class="k">static</span> <span class="n">int32_t</span> <span class="nf">vpx_img_plane_height</span><span class="p">(</span><span class="k">const</span> <span class="n">vpx_image_t</span> <span class="o">*</span><span class="n">img</span><span class="p">,</span> <span class="n">int32_t</span> <span class="n">plane</span><span class="p">);</span>
+
+    <span class="n">vpx_codec_ctx_t</span> <span class="n">codec</span><span class="p">;</span>
+    <span class="n">video_t</span><span class="o">*</span> <span class="n">video</span><span class="p">;</span>
+    <span class="n">int32_t</span> <span class="n">video_index</span><span class="p">;</span>
+    <span class="n">int32_t</span> <span class="n">size_x</span><span class="p">;</span>
+    <span class="n">int32_t</span> <span class="n">size_y</span><span class="p">;</span>
+    <span class="n">int32_t</span> <span class="n">half_x</span><span class="p">;</span>
+    <span class="n">int32_t</span> <span class="n">half_y</span><span class="p">;</span>
+    <span class="kt">bool</span> <span class="n">initialized</span><span class="p">;</span>
+<span class="p">};</span>
+
+<span class="n">video_player_t</span><span class="o">::</span><span class="n">video_player_t</span><span class="p">(</span><span class="n">int32_t</span> <span class="n">res_x</span><span class="p">,</span> <span class="n">int32_t</span> <span class="n">res_y</span><span class="p">)</span> <span class="p">{</span>
+    <span class="n">size_x</span> <span class="o">=</span> <span class="n">res_x</span><span class="p">;</span>
+    <span class="n">size_y</span> <span class="o">=</span> <span class="n">res_y</span><span class="p">;</span>
+    <span class="n">half_x</span> <span class="o">=</span> <span class="n">res_x</span> <span class="o">/</span> <span class="mi">2</span><span class="p">;</span>
+    <span class="n">half_y</span> <span class="o">=</span> <span class="n">res_y</span> <span class="o">/</span> <span class="mi">2</span><span class="p">;</span>
+    <span class="n">video_index</span> <span class="o">=</span> <span class="o">-</span><span class="mi">1</span><span class="p">;</span>
+
+    <span class="n">vpx_codec_dec_cfg_t</span> <span class="n">cfg</span><span class="p">;</span>
+    <span class="n">cfg</span><span class="p">.</span><span class="n">threads</span> <span class="o">=</span> <span class="mi">1</span><span class="p">;</span>
+    <span class="n">cfg</span><span class="p">.</span><span class="n">w</span> <span class="o">=</span> <span class="n">res_x</span><span class="p">;</span>
+    <span class="n">cfg</span><span class="p">.</span><span class="n">h</span> <span class="o">=</span> <span class="n">res_y</span><span class="p">;</span>
+
+    <span class="n">initialized</span> <span class="o">=</span> <span class="p">(</span><span class="n">vpx_codec_dec_init_ver</span><span class="p">(</span>
+        <span class="o">&amp;</span><span class="n">codec</span><span class="p">,</span> 
+        <span class="n">vpx_codec_vp9_dx</span><span class="p">(),</span> 
+        <span class="o">&amp;</span><span class="n">cfg</span><span class="p">,</span> 
+        <span class="mi">0</span><span class="p">,</span> 
+        <span class="n">VPX_DECODER_ABI_VERSION</span><span class="p">)</span> <span class="o">==</span> <span class="n">VPX_CODEC_OK</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="n">video_player_t</span><span class="o">::~</span><span class="n">video_player_t</span><span class="p">()</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="p">(</span><span class="k">this</span><span class="o">-&gt;</span><span class="n">initialized</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">vpx_codec_destroy</span><span class="p">(</span><span class="o">&amp;</span><span class="n">codec</span><span class="p">);</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kt">void</span> <span class="n">video_player_t</span><span class="o">::</span><span class="n">load</span><span class="p">(</span><span class="n">video_t</span><span class="o">*</span> <span class="n">video_in</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">video</span> <span class="o">!=</span> <span class="n">video_in</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">video</span> <span class="o">=</span> <span class="n">video_in</span><span class="p">;</span>
+        <span class="n">video_index</span> <span class="o">=</span> <span class="o">-</span><span class="mi">1</span><span class="p">;</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kt">void</span> <span class="n">video_player_t</span><span class="o">::</span><span class="n">update</span><span class="p">(</span><span class="n">int64_t</span> <span class="n">us_time</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">initialized</span> <span class="o">==</span> <span class="nb">false</span> <span class="o">||</span> <span class="n">video</span> <span class="o">==</span> <span class="k">nullptr</span> <span class="o">||</span> <span class="n">video</span><span class="o">-&gt;</span><span class="n">frame_count</span> <span class="o">&lt;</span> <span class="mi">2</span><span class="p">)</span> <span class="p">{</span>
+        <span class="k">return</span><span class="p">;</span>
+    <span class="p">}</span>
+
+    <span class="n">int64_t</span> <span class="n">us_looped</span> <span class="o">=</span> <span class="n">us_time</span> <span class="o">%</span> <span class="n">video</span><span class="o">-&gt;</span><span class="n">us_video_duration</span><span class="p">;</span>
+    <span class="n">int32_t</span> <span class="n">frame_index</span> <span class="o">=</span> <span class="p">(</span><span class="n">us_looped</span> <span class="o">/</span> <span class="n">video</span><span class="o">-&gt;</span><span class="n">us_frame_duration</span><span class="p">)</span> <span class="o">%</span> <span class="n">video</span><span class="o">-&gt;</span><span class="n">frame_count</span><span class="p">;</span>
+
+    <span class="k">if</span> <span class="p">(</span><span class="n">video_index</span> <span class="o">&gt;</span> <span class="n">frame_index</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">video_index</span> <span class="o">=</span> <span class="o">-</span><span class="mi">1</span><span class="p">;</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">vpx_codec_decode</span><span class="p">(</span><span class="o">&amp;</span><span class="n">codec</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">)</span> <span class="o">!=</span> <span class="n">VPX_CODEC_OK</span><span class="p">)</span> <span class="p">{</span>
+            <span class="k">return</span><span class="p">;</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+
+    <span class="n">int64_t</span> <span class="n">us_decode_start</span> <span class="o">=</span> <span class="n">timer_query</span><span class="p">();</span>
+
+    <span class="c1">// Force a first frame decode if the video is unloaded.
+</span><span class="c1"></span>    <span class="k">if</span> <span class="p">(</span><span class="n">video_index</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">video_frame_t</span> <span class="n">frame</span> <span class="o">=</span> <span class="n">video</span><span class="o">-&gt;</span><span class="n">frames</span><span class="p">[</span><span class="mi">0</span><span class="p">];</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">vpx_codec_decode</span><span class="p">(</span><span class="o">&amp;</span><span class="n">codec</span><span class="p">,</span> <span class="n">video</span><span class="o">-&gt;</span><span class="n">src</span> <span class="o">+</span> <span class="n">frame</span><span class="p">.</span><span class="n">pos</span><span class="p">,</span> <span class="n">frame</span><span class="p">.</span><span class="n">bytes</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="o">==</span> <span class="n">VPX_CODEC_OK</span><span class="p">)</span> <span class="p">{</span>
+            <span class="n">video_index</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+
+    <span class="c1">// Seek to nearest keyframe.
+</span><span class="c1"></span>    <span class="k">for</span> <span class="p">(</span><span class="n">int32_t</span> <span class="n">index</span> <span class="o">=</span> <span class="n">video_index</span> <span class="o">+</span> <span class="mi">1</span><span class="p">;</span> <span class="n">index</span> <span class="o">&lt;</span> <span class="n">frame_index</span><span class="p">;</span> <span class="o">++</span><span class="n">index</span><span class="p">)</span> <span class="p">{</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">video</span><span class="o">-&gt;</span><span class="n">frames</span><span class="p">[</span><span class="n">index</span><span class="p">].</span><span class="n">kf</span><span class="p">)</span> <span class="p">{</span>
+            <span class="n">video_index</span> <span class="o">=</span> <span class="n">index</span><span class="p">;</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+
+    <span class="c1">// Decode until we hit the loop stop point, or it takes too long.
+</span><span class="c1"></span>    <span class="k">while</span> <span class="p">(</span><span class="n">video_index</span> <span class="o">&lt;</span> <span class="n">frame_index</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">int64_t</span> <span class="n">us_decode_now</span> <span class="o">=</span> <span class="n">timer_query</span><span class="p">();</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">us_decode_now</span> <span class="o">-</span> <span class="n">us_decode_start</span> <span class="o">&gt;=</span> <span class="mi">8000</span><span class="p">)</span> <span class="p">{</span>
+            <span class="k">break</span><span class="p">;</span>
+        <span class="p">}</span>
+
+        <span class="n">video_frame_t</span> <span class="n">frame</span> <span class="o">=</span> <span class="n">video</span><span class="o">-&gt;</span><span class="n">frames</span><span class="p">[</span><span class="n">video_index</span><span class="o">++</span><span class="p">];</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">vpx_codec_decode</span><span class="p">(</span><span class="o">&amp;</span><span class="n">codec</span><span class="p">,</span> <span class="n">video</span><span class="o">-&gt;</span><span class="n">src</span> <span class="o">+</span> <span class="n">frame</span><span class="p">.</span><span class="n">pos</span><span class="p">,</span> <span class="n">frame</span><span class="p">.</span><span class="n">bytes</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="o">!=</span> <span class="n">VPX_CODEC_OK</span><span class="p">)</span> <span class="p">{</span>
+            <span class="k">break</span><span class="p">;</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+
+    <span class="n">vpx_codec_iter_t</span> <span class="n">iter</span> <span class="o">=</span> <span class="nb">NULL</span><span class="p">;</span>
+    <span class="n">vpx_image_t</span><span class="o">*</span> <span class="n">img</span> <span class="o">=</span> <span class="n">vpx_codec_get_frame</span><span class="p">(</span><span class="o">&amp;</span><span class="n">codec</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">iter</span><span class="p">);</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">img</span> <span class="o">&amp;&amp;</span> <span class="n">img</span><span class="o">-&gt;</span><span class="n">fmt</span> <span class="o">==</span> <span class="n">VPX_IMG_FMT_I420</span><span class="p">)</span> <span class="p">{</span>
+        <span class="c1">// Y, U, V
+</span><span class="c1"></span>        <span class="k">for</span> <span class="p">(</span><span class="n">uint32_t</span> <span class="n">i_plane</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="n">i_plane</span> <span class="o">&lt;</span> <span class="mi">3</span><span class="p">;</span> <span class="o">++</span><span class="n">i_plane</span><span class="p">)</span> <span class="p">{</span>
+            <span class="n">int32_t</span> <span class="n">w</span> <span class="o">=</span> <span class="n">vpx_img_plane_width</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="n">i_plane</span><span class="p">);</span>
+            <span class="n">int32_t</span> <span class="n">h</span> <span class="o">=</span> <span class="n">vpx_img_plane_height</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="n">i_plane</span><span class="p">);</span>
+            <span class="n">render_update_plane</span><span class="p">(</span><span class="n">i_plane</span><span class="p">,</span> <span class="n">img</span><span class="o">-&gt;</span><span class="n">planes</span><span class="p">[</span><span class="n">i_plane</span><span class="p">],</span> <span class="n">img</span><span class="o">-&gt;</span><span class="n">stride</span><span class="p">[</span><span class="n">i_plane</span><span class="p">],</span> <span class="n">w</span><span class="p">,</span> <span class="n">h</span><span class="p">);</span>
+        <span class="p">}</span>
+        <span class="n">vpx_img_free</span><span class="p">(</span><span class="n">img</span><span class="p">);</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="n">int32_t</span> <span class="n">video_player_t</span><span class="o">::</span><span class="n">vpx_img_plane_width</span><span class="p">(</span><span class="k">const</span> <span class="n">vpx_image_t</span><span class="o">*</span> <span class="n">img</span><span class="p">,</span> <span class="n">int32_t</span> <span class="n">plane</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">plane</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="n">img</span><span class="o">-&gt;</span><span class="n">x_chroma_shift</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+        <span class="k">return</span> <span class="p">(</span><span class="n">img</span><span class="o">-&gt;</span><span class="n">d_w</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">&gt;&gt;</span> <span class="n">img</span><span class="o">-&gt;</span><span class="n">x_chroma_shift</span><span class="p">;</span>
+    <span class="p">}</span>
+
+    <span class="k">return</span> <span class="n">img</span><span class="o">-&gt;</span><span class="n">d_w</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="n">int32_t</span> <span class="n">video_player_t</span><span class="o">::</span><span class="n">vpx_img_plane_height</span><span class="p">(</span><span class="k">const</span> <span class="n">vpx_image_t</span><span class="o">*</span> <span class="n">img</span><span class="p">,</span> <span class="n">int32_t</span> <span class="n">plane</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">plane</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="n">img</span><span class="o">-&gt;</span><span class="n">y_chroma_shift</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+        <span class="k">return</span> <span class="p">(</span><span class="n">img</span><span class="o">-&gt;</span><span class="n">d_h</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">&gt;&gt;</span> <span class="n">img</span><span class="o">-&gt;</span><span class="n">y_chroma_shift</span><span class="p">;</span>
+    <span class="p">}</span>
+
+    <span class="k">return</span> <span class="n">img</span><span class="o">-&gt;</span><span class="n">d_h</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>This will be familiar if you&rsquo;ve seen the libvpx samples.
+It&rsquo;s a variation on their
+<a href="https://github.com/webmproject/libvpx/blob/master/examples/simple_decoder.c">decoder</a>
+ with a extra features:</p>
+
+<ul>
+<li>Video swapping</li>
+<li>Video seeking</li>
+<li>Video looping</li>
+<li>Support for arbitrary video playback speeds</li>
+<li>Graceful degradation when the CPU can&rsquo;t decode fast enough</li>
+</ul>
+
+<p>Video swapping and position seeking are both implemented by
+removing any concept of playback state (play, pause, etc) from
+the video player and just working directly with the timestamp.
+This gives more control and has the added benefit of being easier
+to manage from the game side.</p>
+
+<p>For fast playback rates (8x or higher in my experience) you&rsquo;re
+likely to see very long decode times (~70ms) if you don&rsquo;t have a lot of
+i-frames in your video. By querying the timer and limiting the amount
+of time per-frame is spent decoding, the video will play slower or
+skip until it&rsquo;s able to catch up.</p>
+
+<p>If you need to perform seeking a lot, an optimization that can be done
+is to search backwards from your estimated target frame for the nearest
+i-frame.</p>
+
+<h3 id="video-rendering">Video Rendering</h3>
+
+<p>The only notable piece of the rendering stack is the pixel shader (HLSL):</p>
+<div class="highlight"><pre class="chroma"><code class="language-c++" data-lang="c++"><span class="k">struct</span> <span class="n">vs_output_t</span> <span class="p">{</span>
+    <span class="n">float4</span> <span class="nl">pos</span> <span class="p">:</span> <span class="n">SV_POSITION</span><span class="p">;</span>
+    <span class="n">float2</span> <span class="nl">tex</span> <span class="p">:</span> <span class="n">TEXCOORD0</span><span class="p">;</span>
+<span class="p">};</span>
+
+<span class="n">Texture2D</span> <span class="nl">y_tex</span> <span class="p">:</span> <span class="k">register</span><span class="p">(</span><span class="n">t0</span><span class="p">);</span>
+<span class="n">Texture2D</span> <span class="nl">u_tex</span> <span class="p">:</span> <span class="k">register</span><span class="p">(</span><span class="n">t1</span><span class="p">);</span>
+<span class="n">Texture2D</span> <span class="nl">v_tex</span> <span class="p">:</span> <span class="k">register</span><span class="p">(</span><span class="n">t2</span><span class="p">);</span>
+<span class="n">SamplerState</span> <span class="nl">r_samp</span> <span class="p">:</span> <span class="k">register</span><span class="p">(</span><span class="n">s0</span><span class="p">);</span>
+
+<span class="n">float4</span> <span class="nf">main</span><span class="p">(</span><span class="n">vs_output_t</span> <span class="n">input</span><span class="p">)</span> <span class="o">:</span> <span class="n">SV_TARGET</span> <span class="p">{</span>
+    <span class="n">float3</span> <span class="n">yuv</span><span class="p">;</span>
+    <span class="n">yuv</span><span class="p">.</span><span class="n">x</span> <span class="o">=</span> <span class="n">y_tex</span><span class="p">.</span><span class="n">Sample</span><span class="p">(</span><span class="n">r_samp</span><span class="p">,</span> <span class="n">input</span><span class="p">.</span><span class="n">tex</span><span class="p">).</span><span class="n">r</span><span class="p">;</span>
+    <span class="n">yuv</span><span class="p">.</span><span class="n">y</span> <span class="o">=</span> <span class="n">u_tex</span><span class="p">.</span><span class="n">Sample</span><span class="p">(</span><span class="n">r_samp</span><span class="p">,</span> <span class="n">input</span><span class="p">.</span><span class="n">tex</span><span class="p">).</span><span class="n">r</span><span class="p">;</span>
+    <span class="n">yuv</span><span class="p">.</span><span class="n">z</span> <span class="o">=</span> <span class="n">v_tex</span><span class="p">.</span><span class="n">Sample</span><span class="p">(</span><span class="n">r_samp</span><span class="p">,</span> <span class="n">input</span><span class="p">.</span><span class="n">tex</span><span class="p">).</span><span class="n">r</span><span class="p">;</span>
+    <span class="n">yuv</span> <span class="o">+=</span> <span class="n">float3</span><span class="p">(</span><span class="o">-</span><span class="mf">0.0627451017</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.501960814</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.501960814</span><span class="p">);</span>
+
+    <span class="n">float4</span> <span class="n">output</span><span class="p">;</span>
+    <span class="n">output</span><span class="p">.</span><span class="n">r</span> <span class="o">=</span> <span class="n">dot</span><span class="p">(</span><span class="n">yuv</span><span class="p">,</span> <span class="n">float3</span><span class="p">(</span><span class="mf">1.164</span><span class="p">,</span>  <span class="mf">0.000</span><span class="p">,</span>  <span class="mf">1.596</span><span class="p">));</span>
+    <span class="n">output</span><span class="p">.</span><span class="n">g</span> <span class="o">=</span> <span class="n">dot</span><span class="p">(</span><span class="n">yuv</span><span class="p">,</span> <span class="n">float3</span><span class="p">(</span><span class="mf">1.164</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.391</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.813</span><span class="p">));</span>
+    <span class="n">output</span><span class="p">.</span><span class="n">b</span> <span class="o">=</span> <span class="n">dot</span><span class="p">(</span><span class="n">yuv</span><span class="p">,</span> <span class="n">float3</span><span class="p">(</span><span class="mf">1.164</span><span class="p">,</span>  <span class="mf">2.018</span><span class="p">,</span>  <span class="mf">0.000</span><span class="p">));</span>
+    <span class="n">output</span><span class="p">.</span><span class="n">a</span> <span class="o">=</span> <span class="mf">1.0f</span><span class="p">;</span>
+
+    <span class="k">return</span> <span class="n">output</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>The Y, U and V planes are provided as <code>DXGI_FORMAT_R8_UNORM</code> textures to the shader and
+are recombined to form an RGB image. As noted before, the only full resolution texture is
+the Y plane, and the U and V planes are half resolution.</p>
+
+<h3 id="sound">Sound</h3>
+
+<p>I found it simpler to use a minimal video container like IVF than deal with something
+that combined both video and audio streams into a single file. While you&rsquo;d want the
+video synced to the audio, as long as you can query the audio playback timestamp or keep
+the playback state the same as the video you shouldn&rsquo;t have any issues with keeping
+the video audio players decoupled.</p>
+
+<h3 id="demo-and-source">Demo and Source</h3>
+
+<p>I&rsquo;ve put together a simplified (but fully functional) VP9 player that can take a user
+provided IVF file and play it back. It also shows the full D3D11 renderer in all its
+verbosity, as that would be too long to post in the article itself.
+The demo is available on my <a href="https://github.com/nkga/vp9-player">GitHub</a>.</p>
+</article>
+</main>
+<footer class="site-footer">
+    <hr/>
+    &copy; 2018 nkga
+</footer>
+</div>
+</body>
+</html>

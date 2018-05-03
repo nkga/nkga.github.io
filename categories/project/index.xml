@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>Project on nkga blog</title>
+    <link>http://localhost:1313/categories/project/</link>
+    <description>Recent content in Project on nkga blog</description>
+    <generator>Hugo -- gohugo.io</generator>
+    <language>en-us</language>
+    <lastBuildDate>Tue, 01 May 2018 00:00:00 +0000</lastBuildDate>
+    
+	<atom:link href="http://localhost:1313/categories/project/index.xml" rel="self" type="application/rss+xml" />
+    
+    
+    <item>
+      <title>Shinkai: A Subnautica Multiplayer Mod</title>
+      <link>http://localhost:1313/post/shinkai-a-subnautica-multiplayer-mod/</link>
+      <pubDate>Tue, 01 May 2018 00:00:00 +0000</pubDate>
+      
+      <guid>http://localhost:1313/post/shinkai-a-subnautica-multiplayer-mod/</guid>
+      <description>&lt;p&gt;&lt;img src=&#34;../../img/subnautica_players.jpg&#34; alt=&#34;Subnautica Multiplayer&#34; /&gt;&lt;/p&gt;
+
+&lt;p&gt;Shinkai (深海) is a multiplayer mod for
+the game &lt;a href=&#34;https://store.steampowered.com/app/264710/Subnautica/&#34;&gt;Subnautica&lt;/a&gt;.
+It is open source and available on &lt;a href=&#34;https://github.com/nkga/shinkai&#34;&gt;GitHub&lt;/a&gt;.&lt;/p&gt;
+
+&lt;p&gt;The mod was tested on the March update of the game (Update 84), but it seems to work
+with the April build as well. I have personally verified that the game was playable
+from beginning to completion with 3 friends online, but there isn&amp;rsquo;t any explicit limit.
+As far as a feature list goes, most of the single player experience carries over
+to multiplayer the way you would expect it to.&lt;/p&gt;
+
+&lt;p&gt;Notes on development of the mod and its challenges follow below.
+&lt;/p&gt;</description>
+    </item>
+    
+    <item>
+      <title>Video Playback for Games with VP9</title>
+      <link>http://localhost:1313/post/video-playback-for-games-with-vp9/</link>
+      <pubDate>Sat, 14 Apr 2018 00:00:00 +0000</pubDate>
+      
+      <guid>http://localhost:1313/post/video-playback-for-games-with-vp9/</guid>
+      <description>&lt;p&gt;When working on porting an older PC game to a modern version of Windows I
+needed play its prerecorded videos in-game. Commercial engines (Unity, UE4)
+include this functionality, and there are also standalone solutions
+&lt;a href=&#34;www.radgametools.com/bink&#34;&gt;Bink&lt;/a&gt; that can work for a custom engine. I wasn&amp;rsquo;t
+interested in licensing a commercial product, so I developed my own video player.
+&lt;/p&gt;</description>
+    </item>
+    
+  </channel>
+</rss>

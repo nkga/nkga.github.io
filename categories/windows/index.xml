@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>Windows on nkga blog</title>
+    <link>http://localhost:1313/categories/windows/</link>
+    <description>Recent content in Windows on nkga blog</description>
+    <generator>Hugo -- gohugo.io</generator>
+    <language>en-us</language>
+    <lastBuildDate>Sun, 22 Apr 2018 00:00:00 +0000</lastBuildDate>
+    
+	<atom:link href="http://localhost:1313/categories/windows/index.xml" rel="self" type="application/rss+xml" />
+    
+    
+    <item>
+      <title>Frame Pacing: Analysis of the Game Loop</title>
+      <link>http://localhost:1313/post/frame-pacing-analysis-of-the-game-loop/</link>
+      <pubDate>Sun, 22 Apr 2018 00:00:00 +0000</pubDate>
+      
+      <guid>http://localhost:1313/post/frame-pacing-analysis-of-the-game-loop/</guid>
+      <description>&lt;p&gt;&lt;img src=&#34;../../img/msvc_frametime_analysis.png&#34; alt=&#34;Frame Pacing Analysis&#34; /&gt;&lt;/p&gt;
+
+&lt;p&gt;The graph above was generated from Visual Studio&amp;rsquo;s performance profiler on a custom
+game engine. It illustrates the time taken to render each frame, in milliseconds.
+From the 7282 frames that were rendered during this collection period, there were
+only 36 that did not take exactly 16667μs (60FPS target framerate). Of these 36,
+the largest difference was only 88μs.&lt;/p&gt;
+
+&lt;p&gt;Frame pacing is the consistency of frame-times for rendered frames in your engine.
+If you want your game to feel &amp;ldquo;smooth&amp;rdquo; or &amp;ldquo;fluid&amp;rdquo;, you should aim to have consistent
+frame pacing like the graph above. In this article, I&amp;rsquo;ll be walking you through
+the low level details that you can implement in your own engine.
+&lt;/p&gt;</description>
+    </item>
+    
+  </channel>
+</rss>
