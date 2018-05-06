@@ -176,6 +176,10 @@ a:hover {
 	text-align: center
 }
 
+.site-footer a {
+	color: #999;
+}
+
 .site-title {
 	float: left
 }
@@ -350,6 +354,10 @@ template,
 	padding: 0 .4em
 }
 
+.chroma .k {
+	color: #d73a49
+}
+
 .chroma .kt {
 	color: #458
 }
@@ -390,7 +398,7 @@ template,
 }
 
 .chroma .nt {
-	color: navy
+	color: #000080
 }
 
 .chroma .s,

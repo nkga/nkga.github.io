@@ -3,13 +3,15 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>nkga blog | nkga blog</title>
+  <title>nkga blog</title>
+  <meta name="author" content="nkga">
+  <meta name="description" content="Programming, game development, security, and reverse engineering." />
   <link rel="stylesheet" href="./css/style.css" />
 </head>
 <body>
 <header class="site-header" role="banner">
     <div class="wrapper">
-  <a class="site-title" rel="author" href="https://nkga.github.io/">nkga blog</a>
+  <a class="site-title" href="https://nkga.github.io/">nkga blog</a>
   <nav class="site-nav">
     <a class="site-link" href="./post">posts</a>
     <a class="site-link" href="https://github.com/nkga/">github</a>
@@ -19,8 +21,29 @@
 <div class="wrapper">
 <main class="page-content" aria-label="Content">
 
+<article>
+    <h1 class="post-title"><a href="./post/ggdm---combat-analysis-mod-for-guild-wars-2/">GGDM - Combat Analysis Mod for Guild Wars 2</a></h1>
+    <p class="post-meta">Posted on 2018/05/06</p>
+    <p><img src="./img/ggdm_dps_graph.png" alt="GGDM DPS Graph Sample" /></p>
 
-    <article>
+<p>GGDM was an addon for <a href="https://www.guildwars2.com/en/">Guild Wars 2</a> that
+I developed and maintained from 2015 to 2018. It started off as a simple
+tool to display personal DPS in the game, but its feature list grew:</p>
+
+<ul>
+<li>Real-time group and personal DPS analysis and logging</li>
+<li>GUI modifications overlays for healing and combat</li>
+<li>Automatic network updates and real-time reloading</li>
+<li>Build templates for swapping gear, traits and skills</li>
+</ul>
+
+<p>This post walks through the development of these features and reverse
+engineering of the game.</p>
+
+<p></p>
+    <p><a href="./post/ggdm---combat-analysis-mod-for-guild-wars-2/">Continue reading &nbsp;&raquo;</a></p>
+</article>
+<article>
     <h1 class="post-title"><a href="./post/shinkai-a-subnautica-multiplayer-mod/">Shinkai: A Subnautica Multiplayer Mod</a></h1>
     <p class="post-meta">Posted on 2018/05/01</p>
     <p><img src="./img/subnautica_players.jpg" alt="Subnautica Multiplayer" /></p>
@@ -37,13 +60,9 @@ to multiplayer the way you would expect it to.</p>
 
 <p>Notes on development of the mod and its challenges follow below.
 </p>
-    
     <p><a href="./post/shinkai-a-subnautica-multiplayer-mod/">Continue reading &nbsp;&raquo;</a></p>
-    
 </article>
-
-
-    <article>
+<article>
     <h1 class="post-title"><a href="./post/frame-pacing-analysis-of-the-game-loop/">Frame Pacing: Analysis of the Game Loop</a></h1>
     <p class="post-meta">Posted on 2018/04/22</p>
     <p><img src="./img/msvc_frametime_analysis.png" alt="Frame Pacing Analysis" /></p>
@@ -59,13 +78,9 @@ If you want your game to feel &ldquo;smooth&rdquo; or &ldquo;fluid&rdquo;, you s
 frame pacing like the graph above. In this article, I&rsquo;ll be walking you through
 the low level details that you can implement in your own engine.
 </p>
-    
     <p><a href="./post/frame-pacing-analysis-of-the-game-loop/">Continue reading &nbsp;&raquo;</a></p>
-    
 </article>
-
-
-    <article>
+<article>
     <h1 class="post-title"><a href="./post/video-playback-for-games-with-vp9/">Video Playback for Games with VP9</a></h1>
     <p class="post-meta">Posted on 2018/04/14</p>
     <p>When working on porting an older PC game to a modern version of Windows I
@@ -74,12 +89,8 @@ include this functionality, and there are also standalone solutions
 <a href="www.radgametools.com/bink">Bink</a> that can work for a custom engine. I wasn&rsquo;t
 interested in licensing a commercial product, so I developed my own video player.
 </p>
-    
     <p><a href="./post/video-playback-for-games-with-vp9/">Continue reading &nbsp;&raquo;</a></p>
-    
 </article>
-
-
 <nav class="site-paginator">
     <p>
         
@@ -91,7 +102,7 @@ interested in licensing a commercial product, so I developed my own video player
 </main>
 <footer class="site-footer">
     <hr/>
-    &copy; 2018 nkga
+    &copy; 2018 nkga. Code snippets licensed under the <a href="https://opensource.org/licenses/MIT">MIT License</a>.
 </footer>
 </div>
 </body>

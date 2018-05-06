@@ -6,10 +6,35 @@
     <description>Recent content in Project on nkga blog</description>
     <generator>Hugo -- gohugo.io</generator>
     <language>en-us</language>
-    <lastBuildDate>Tue, 01 May 2018 00:00:00 +0000</lastBuildDate>
+    <lastBuildDate>Sun, 06 May 2018 00:00:00 +0000</lastBuildDate>
     
 	<atom:link href="https://nkga.github.io/categories/project/index.xml" rel="self" type="application/rss+xml" />
     
+    
+    <item>
+      <title>GGDM - Combat Analysis Mod for Guild Wars 2</title>
+      <link>https://nkga.github.io/post/ggdm---combat-analysis-mod-for-guild-wars-2/</link>
+      <pubDate>Sun, 06 May 2018 00:00:00 +0000</pubDate>
+      
+      <guid>https://nkga.github.io/post/ggdm---combat-analysis-mod-for-guild-wars-2/</guid>
+      <description>&lt;p&gt;&lt;img src=&#34;../../img/ggdm_dps_graph.png&#34; alt=&#34;GGDM DPS Graph Sample&#34; /&gt;&lt;/p&gt;
+
+&lt;p&gt;GGDM was an addon for &lt;a href=&#34;https://www.guildwars2.com/en/&#34;&gt;Guild Wars 2&lt;/a&gt; that
+I developed and maintained from 2015 to 2018. It started off as a simple
+tool to display personal DPS in the game, but its feature list grew:&lt;/p&gt;
+
+&lt;ul&gt;
+&lt;li&gt;Real-time group and personal DPS analysis and logging&lt;/li&gt;
+&lt;li&gt;GUI modifications overlays for healing and combat&lt;/li&gt;
+&lt;li&gt;Automatic network updates and real-time reloading&lt;/li&gt;
+&lt;li&gt;Build templates for swapping gear, traits and skills&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;This post walks through the development of these features and reverse
+engineering of the game.&lt;/p&gt;
+
+&lt;p&gt;&lt;/p&gt;</description>
+    </item>
     
     <item>
       <title>Shinkai: A Subnautica Multiplayer Mod</title>

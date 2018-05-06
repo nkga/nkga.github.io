@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GGDM - Combat Analysis Mod for Guild Wars 2 | nkga blog</title>
+  <meta name="author" content="nkga">
+  <meta name="description" content="Development notes for a Guild Wars 2 addon written in C&#43;&#43;." />
+  <link rel="stylesheet" href="../../css/style.css" />
+</head>
+<body>
+<header class="site-header" role="banner">
+    <div class="wrapper">
+  <a class="site-title" href="https://nkga.github.io/">nkga blog</a>
+  <nav class="site-nav">
+    <a class="site-link" href="../../post">posts</a>
+    <a class="site-link" href="https://github.com/nkga/">github</a>
+  </nav>
+</div>
+</header>
+<div class="wrapper">
+<main class="page-content" aria-label="Content">
+<article>
+    <h1 class="post-title">GGDM - Combat Analysis Mod for Guild Wars 2</h1>
+    <p class="post-meta">Posted on 2018/05/06</p>
+    <p><img src="../../img/ggdm_dps_graph.png" alt="GGDM DPS Graph Sample" /></p>
+
+<p>GGDM was an addon for <a href="https://www.guildwars2.com/en/">Guild Wars 2</a> that
+I developed and maintained from 2015 to 2018. It started off as a simple
+tool to display personal DPS in the game, but its feature list grew:</p>
+
+<ul>
+<li>Real-time group and personal DPS analysis and logging</li>
+<li>GUI modifications overlays for healing and combat</li>
+<li>Automatic network updates and real-time reloading</li>
+<li>Build templates for swapping gear, traits and skills</li>
+</ul>
+
+<p>This post walks through the development of these features and reverse
+engineering of the game.</p>
+
+<p></p>
+
+<p>Note: I still refer to the addon as a
+&ldquo;meter&rdquo; below, even if it&rsquo;s grown to include much more.</p>
+
+<h3 id="dll-proxying">DLL Proxying</h3>
+
+<p>Injecting code into Guild Wars 2 is as simple as having it
+load a DLL proxy. I substitute the system <code>d3d9.dll</code> by
+providing my own version placed in the game&rsquo;s directory. This gives
+direct access to the engine&rsquo;s <code>IDirect3D9</code> interface,
+providing an easy opportunity to patch <code>IDirect3DDevice9::Present</code>
+and <code>IDirect3DDevice9::Reset</code>. I make use of these functions
+in both updating the meter and handling D3D9 resources used
+to render the meter&rsquo;s overlay.</p>
+
+<p>Standard Windows DLL load order first looks at the application
+directory when loading a DLL. As long as you provide exports
+for all the functions the game imports from the DLL (and intercept
+and redirect those to the real DLL), the DLL proxy is functionally
+the same as the real one. This is more convenient than having
+to run a code injector since the DLL gets loaded automatically
+by the operating system.</p>
+
+<h3 id="hot-reloading">Hot-Reloading</h3>
+
+<p>Launching the game and logging into a map usually takes around
+a minute to complete. For fast iteration and testing of the meter,
+I developed a hot-reloading system. The <code>d3d9.dll</code> proxy doesn&rsquo;t
+contain any game specific code, but rather a system that handles
+loading the meter&rsquo;s DLL.</p>
+
+<p>DLL files are write-locked on disk when loaded by Windows. I copy
+the meter DLL to a temporary directory and load it from there to
+allow the original meter DLL to be overwritten for new compilations
+and automatic updates. The loader waits for either a hotkey
+combination or the meter itself to request a reload, the latter
+of which is typically performed for reloading after an update
+from the network. The temporary file is removed when
+the game is closed.</p>
+
+<h3 id="automatic-updates">Automatic Updates</h3>
+
+<p>The meter can update itself from the network with a new version
+and reload itself while the game is running with the hot-reload
+system. Security was an important concern from the start,
+so I designed the update system to satisfy both integrity and authenticity
+<a href="https://security.stackexchange.com/questions/148173/authenticity-confidentiality-integrity-general-questions">security goals</a>.</p>
+
+<p>The meter uses a CRC32 for determining version, but for authenticity
+and integrity it makes use of RSA signing and a SHA-256 hash. I generated a public/private
+4096-bit RSA key pair and embedded the public key into the meter&rsquo;s binary.
+Modern browsers do a similar technique with
+<a href="https://wiki.mozilla.org/SecurityEngineering/Public_Key_Pinning">public key pinning</a>
+- a static certificate pin list embedded into the browser binary.</p>
+
+<p>To issue a valid update, I have to produce a signature by signing
+the SHA-256 hash of the meter&rsquo;s update data with my private key.
+The signature is sent alongside the update data and is verified by the client
+using the embedded public key. The update is only written to disk once it has been
+verified. If the verification fails, the update data in memory is overwritten
+with zeros.</p>
+
+<p>This design prevents man-in-the middle, DNS modification, IP spoofing,
+and other related attacks. An attacker also isn&rsquo;t capable of swapping
+out updates on the server if the server was compromised. Provided that
+my private key is kept secure, and that the initial download of the meter
+comes from a secure source, updates are secure.</p>
+
+<p>I deliver update data over UDP for performance, with minimal
+connection state for each client (ip:port pair). The server
+blocks IP spoofing attempts (and amplification attacks) by
+requiring connecting clients to respond with a server generated
+token before sending the server sends any update data (similar
+to TCP SYN cookie). Each IP is additionally limited to a few
+active connections at once, to prevent a single connection from
+creating thousands of clients with different port numbers.
+Each client has a limited amount of bandwidth available
+before being throttled or disconnected. Most denial of service
+attacks are prevented with these restrictions.</p>
+
+<p>This system works out to 48 bytes per client node. No receive
+or send buffers are required, so there&rsquo;s significantly less memory
+overhead than anything written using TCP. The disadvantage of
+this system is compatibility. While the  the client can connect on
+any port they choose, not every ISP and router configuration can properly track
+and manage UDP &ldquo;connections&rdquo; &ndash; particularly ones that share
+IPV4 addresses. This is mostly a concern for the few ISPs in Europe that perform
+<a href="https://en.wikipedia.org/wiki/Carrier-grade_NAT">Carrier-grade NAT</a>
+with <a href="https://en.wikipedia.org/wiki/IPv6_transition_mechanism#Dual-Stack_Lite_.28DS-Lite.29">Dual-Stack Lite</a>.</p>
+
+<h3 id="overlay-rendering">Overlay Rendering</h3>
+
+<p>The meter renderer is written targeting D3D9 (the game still uses it).
+It renders 2D primitives in a single draw call with a vertex
+and index buffer. The renderer is incredibly fast &ndash; preparing and submitting
+tens of thousands of vertices for drawing is done under 100 microseconds.</p>
+
+<p>The font is also my own design, embedded into the meter as a 1-bit image. It supports the
+full latin character set (0x20 - 0xFF) in only 1673 bytes, smaller than its source PNG file (1739 bytes).
+The image is converted and expanded at runtime into a 32-bit RGBA texture (256x128).</p>
+
+<p><img src="../../img/ggdm_font.png" alt="GGDM Font" /></p>
+
+<p>Bitmap fonts are an obvious choice when performance matters. Anti-aliased fonts
+are only legible and attractive at small size when you control the background color, or you
+can read the background data. <a href="https://docs.microsoft.com/en-us/typography/cleartype/">Clear-Type</a> does
+the latter, but doing a GPU readback for the current scene isn&rsquo;t cheap for performance.</p>
+
+<h3 id="immediate-mode-gui">Immediate Mode GUI</h3>
+
+<p>I&rsquo;m familiar with <a href="https://github.com/ocornut/imgui">ImGui</a>,
+but I wrote my own immediate mode GUI library instead. Binary size, compile times, and
+performance were the primary factors in the decision, but
+appearance was also another.</p>
+
+<p>It shares most of the same feature set with ImGui, but with two
+restrictions. Multi-line elements (like graphs) may never be placed in a scroll
+region and every window must be initialized during creation. These restrictions enable
+the GUI to be rendered in a single draw call (no scissor rects), and allow for
+the vertices and indices to be written directly into their respective buffers (avoiding
+a memcpy).</p>
+
+<p><img src="../../img/ggdm_options.png" alt="Options Overlay" /></p>
+
+<p>The API is simple, and the panel above is generated with the following code:</p>
+<div class="highlight"><pre class="chroma"><code class="language-cpp" data-lang="cpp"><span class="k">if</span> <span class="p">(</span><span class="n">gui</span><span class="o">::</span><span class="n">add_window</span><span class="p">(</span><span class="s">&#34;Options&#34;</span><span class="p">,</span> <span class="n">b_options</span><span class="p">)</span> <span class="o">==</span> <span class="nb">false</span><span class="p">)</span> <span class="p">{</span>
+        <span class="k">return</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="n">gui</span><span class="o">::</span><span class="n">set_columns</span><span class="p">(</span><span class="mi">3</span><span class="p">);</span>
+
+<span class="k">static</span> <span class="n">i32</span> <span class="n">tab_idx</span><span class="p">;</span>
+<span class="n">gui</span><span class="o">::</span><span class="n">add_tab</span><span class="p">(</span><span class="n">tab_idx</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="s">&#34;General&#34;</span><span class="p">);</span>
+<span class="n">gui</span><span class="o">::</span><span class="n">add_tab</span><span class="p">(</span><span class="n">tab_idx</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="s">&#34;Keybinds&#34;</span><span class="p">);</span>
+<span class="n">gui</span><span class="o">::</span><span class="n">add_tab</span><span class="p">(</span><span class="n">tab_idx</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="s">&#34;Debug&#34;</span><span class="p">);</span>
+
+<span class="n">gui</span><span class="o">::</span><span class="n">set_columns</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span>
+
+<span class="k">if</span> <span class="p">(</span><span class="n">tab_idx</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">static</span> <span class="n">gui</span><span class="o">::</span><span class="n">scroll_t</span> <span class="n">scroll</span><span class="p">;</span>
+    <span class="n">gui</span><span class="o">::</span><span class="n">add_scroll</span><span class="p">(</span><span class="o">&amp;</span><span class="n">scroll</span><span class="p">);</span>
+
+    <span class="n">gui</span><span class="o">::</span><span class="n">add_header</span><span class="p">(</span><span class="s">&#34;Meter&#34;</span><span class="p">);</span>
+    <span class="n">gui</span><span class="o">::</span><span class="n">add_check_node</span><span class="p">(</span><span class="n">c_dps_auto_hide</span><span class="p">,</span> <span class="s">&#34;Auto Hide&#34;</span><span class="p">);</span>
+    <span class="n">gui</span><span class="o">::</span><span class="n">add_check_node</span><span class="p">(</span><span class="n">c_dps_auto_pos</span><span class="p">,</span> <span class="s">&#34;Auto Position&#34;</span><span class="p">);</span>
+    <span class="n">gui</span><span class="o">::</span><span class="n">add_check_node</span><span class="p">(</span><span class="n">c_dps_auto_size</span><span class="p">,</span> <span class="s">&#34;Auto Size&#34;</span><span class="p">);</span>
+    <span class="n">gui</span><span class="o">::</span><span class="n">add_check_node</span><span class="p">(</span><span class="n">c_dps_show_profs</span><span class="p">,</span> <span class="s">&#34;Show Professions&#34;</span><span class="p">);</span>
+    <span class="n">gui</span><span class="o">::</span><span class="n">add_check_node</span><span class="p">(</span><span class="n">c_dps_show_bars</span><span class="p">,</span> <span class="s">&#34;Show Bars&#34;</span><span class="p">);</span>
+    <span class="n">gui</span><span class="o">::</span><span class="n">add_check_bind</span><span class="p">(</span><span class="n">b_dps_rolling</span><span class="p">,</span> <span class="s">&#34;Rolling Mode&#34;</span><span class="p">);</span>
+    <span class="n">gui</span><span class="o">::</span><span class="n">add_check_bind</span><span class="p">(</span><span class="n">b_dps_cleave</span><span class="p">,</span> <span class="s">&#34;Cleave Mode&#34;</span><span class="p">);</span>
+    <span class="n">gui</span><span class="o">::</span><span class="n">add_label</span><span class="p">(</span><span class="s">&#34;Interval (s)&#34;</span><span class="p">);</span>
+    <span class="n">gui</span><span class="o">::</span><span class="n">add_input_int_node</span><span class="p">(</span><span class="n">c_dps_interval</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">60</span><span class="p">);</span>
+
+    <span class="n">gui</span><span class="o">::</span><span class="n">add_header</span><span class="p">(</span><span class="s">&#34;Logging&#34;</span><span class="p">);</span>
+    <span class="n">gui</span><span class="o">::</span><span class="n">add_check_node</span><span class="p">(</span><span class="n">c_log_enabled</span><span class="p">,</span> <span class="s">&#34;Enabled&#34;</span><span class="p">);</span>
+    <span class="n">gui</span><span class="o">::</span><span class="n">add_check_node</span><span class="p">(</span><span class="n">c_log_auto_start</span><span class="p">,</span> <span class="s">&#34;Auto Start&#34;</span><span class="p">);</span>
+    <span class="n">gui</span><span class="o">::</span><span class="n">add_check_node</span><span class="p">(</span><span class="n">c_log_auto_save</span><span class="p">,</span> <span class="s">&#34;Auto Save&#34;</span><span class="p">);</span>
+
+    <span class="n">gui</span><span class="o">::</span><span class="n">add_label</span><span class="p">(</span><span class="s">&#34;Min Duration (s):&#34;</span><span class="p">);</span>
+    <span class="n">gui</span><span class="o">::</span><span class="n">add_input_int_node</span><span class="p">(</span><span class="n">c_log_auto_time</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">9999</span><span class="p">);</span>
+
+    <span class="n">gui</span><span class="o">::</span><span class="n">add_header</span><span class="p">(</span><span class="s">&#34;Panels&#34;</span><span class="p">);</span>
+
+    <span class="n">gui</span><span class="o">::</span><span class="n">add_check_bind</span><span class="p">(</span><span class="n">b_build</span><span class="p">,</span> <span class="s">&#34;Build&#34;</span><span class="p">);</span>
+    <span class="n">gui</span><span class="o">::</span><span class="n">add_check_bind</span><span class="p">(</span><span class="n">b_compass</span><span class="p">,</span> <span class="s">&#34;Compass&#34;</span><span class="p">);</span>
+    <span class="n">gui</span><span class="o">::</span><span class="n">add_check_bind</span><span class="p">(</span><span class="n">b_log</span><span class="p">,</span> <span class="s">&#34;Log&#34;</span><span class="p">);</span>
+    <span class="n">gui</span><span class="o">::</span><span class="n">add_check_bind</span><span class="p">(</span><span class="n">b_player_info</span><span class="p">,</span> <span class="s">&#34;Player Info&#34;</span><span class="p">);</span>
+    <span class="n">gui</span><span class="o">::</span><span class="n">add_check_bind</span><span class="p">(</span><span class="n">b_target_info</span><span class="p">,</span> <span class="s">&#34;Target Info&#34;</span><span class="p">);</span>
+
+    <span class="n">gui</span><span class="o">::</span><span class="n">end_scroll</span><span class="p">();</span>
+<span class="p">}</span> <span class="c1">// other tabs excluded
+</span><span class="c1"></span></code></pre></div>
+<h3 id="gathering-data">Gathering Data</h3>
+
+<p>Guild Wars 2 offers no API for combat data, so I have to hook the game. All combat
+data is derived from the game&rsquo;s network messages. The game has roughly
+~1300 different types of messages, but maintains a dispatch table for each type.
+Reversing each function individually would normally be too tedious, but the devs
+have &ldquo;left&rdquo; a shortcut &ndash; most functions in Guild Wars 2 make use of a custom
+version of <code>assert</code> used for crash logging.</p>
+
+<p>For example, there&rsquo;s a function with the following strings referenced:</p>
+
+<pre><code>STR: &quot;character&quot;, &quot;itemDef&quot;, &quot;armorDef&quot;, &quot;..\..\..\Game\Char\Cli\ChCliInventory.cpp&quot;
+</code></pre>
+
+<p>From these four strings alone I can easily deduce that this function is used
+for handling something to do with equipment in the player&rsquo;s inventory. Decompiling
+this function or going through with a debugger would then reveal that this function
+was involved in verifying that a piece of equipment was valid to equip.</p>
+
+<pre><code>STR: &quot;character&quot;, &quot;sourceAgent&quot;, &quot;..\..\..\Game\Char\Cli\ChCliMsg.cpp&quot;
+</code></pre>
+
+<p>Agents are entities in the game world, and characters are a specific type of
+entity that the player inherits from. The assertion strings imply something is
+happening to the &ldquo;character&rdquo; in this &ldquo;Character Client Message&rdquo; caused by a
+&ldquo;sourceAgent&rdquo;. Reversing this function shows that it&rsquo;s called when damage is given
+or dealt to a character.</p>
+
+<p>I gather the following types of events by hooking the game&rsquo;s network messages:</p>
+
+<ul>
+<li>Damage done to agents (includes interrupts, blocks, evades)</li>
+<li>Boon/condition applications</li>
+<li>Boon/condition multi stack removals, cleanses</li>
+<li>Boon/condition single stack removals</li>
+<li>Skill casts</li>
+<li>Health updates to agents</li>
+<li>Weapon swaps</li>
+<li>Combat state changes</li>
+</ul>
+
+<p>The data for each event type is grouped together inside my &ldquo;event&rdquo; union:</p>
+<div class="highlight"><pre class="chroma"><code class="language-cpp" data-lang="cpp"><span class="k">struct</span> <span class="n">ev_buff_apply_t</span> <span class="p">{</span>
+    <span class="n">u16</span> <span class="n">target</span><span class="p">;</span>
+    <span class="n">u16</span> <span class="n">source</span><span class="p">;</span>
+    <span class="n">u16</span> <span class="n">skill</span><span class="p">;</span>
+    <span class="n">u8</span> <span class="n">level</span><span class="p">;</span>
+    <span class="n">u8</span> <span class="n">active</span><span class="p">;</span>
+    <span class="n">u16</span> <span class="n">id</span><span class="p">;</span>
+    <span class="n">u16</span> <span class="n">overstack</span><span class="p">;</span>
+    <span class="n">u32</span> <span class="n">duration</span><span class="p">;</span>
+<span class="p">};</span>
+
+<span class="k">struct</span> <span class="n">ev_buff_cleanse_t</span> <span class="p">{</span>
+    <span class="n">u16</span> <span class="n">target</span><span class="p">;</span>
+    <span class="n">u16</span> <span class="n">source</span><span class="p">;</span>
+    <span class="n">u16</span> <span class="n">skill</span><span class="p">;</span>
+    <span class="n">u32</span> <span class="n">duration</span><span class="p">;</span>
+    <span class="n">u32</span> <span class="n">longest</span><span class="p">;</span>
+<span class="p">};</span>
+
+<span class="k">struct</span> <span class="n">ev_buff_remove_t</span> <span class="p">{</span>
+    <span class="n">u16</span> <span class="n">target</span><span class="p">;</span>
+    <span class="n">u16</span> <span class="n">source</span><span class="p">;</span>
+    <span class="n">u16</span> <span class="n">skill</span><span class="p">;</span>
+    <span class="n">u16</span> <span class="n">id</span><span class="p">;</span>
+    <span class="n">u32</span> <span class="n">duration</span><span class="p">;</span>
+    <span class="n">u32</span> <span class="n">left</span><span class="p">;</span>
+<span class="p">};</span>
+
+<span class="k">struct</span> <span class="n">ev_cast_t</span> <span class="p">{</span>
+    <span class="n">u16</span> <span class="n">target</span><span class="p">;</span>
+    <span class="n">u16</span> <span class="n">skill</span><span class="p">;</span>
+    <span class="n">u8</span> <span class="n">quickness</span><span class="p">;</span>
+    <span class="n">u32</span> <span class="n">duration</span><span class="p">;</span>
+    <span class="n">f32</span> <span class="n">rate</span><span class="p">;</span>
+<span class="p">};</span>
+
+<span class="k">struct</span> <span class="n">ev_damage_t</span> <span class="p">{</span>
+    <span class="n">u16</span> <span class="n">target</span><span class="p">;</span>
+    <span class="n">u16</span> <span class="n">source</span><span class="p">;</span>
+    <span class="n">u16</span> <span class="n">skill</span><span class="p">;</span>
+    <span class="n">u8</span> <span class="n">type</span><span class="p">;</span>
+    <span class="n">u8</span> <span class="n">flags</span><span class="p">;</span>
+    <span class="n">i32</span> <span class="n">value</span><span class="p">;</span>
+<span class="p">};</span>
+
+<span class="k">struct</span> <span class="n">ev_health_t</span> <span class="p">{</span>
+    <span class="n">u16</span> <span class="n">target</span><span class="p">;</span>
+    <span class="n">i32</span> <span class="n">value</span><span class="p">;</span>
+    <span class="n">i32</span> <span class="n">total</span><span class="p">;</span>
+<span class="p">};</span>
+
+<span class="k">struct</span> <span class="n">ev_state_t</span> <span class="p">{</span>
+    <span class="n">u16</span> <span class="n">target</span><span class="p">;</span>
+    <span class="n">u16</span> <span class="n">action</span><span class="p">;</span>
+<span class="p">};</span>
+
+<span class="k">struct</span> <span class="n">ev_swap_t</span> <span class="p">{</span>
+    <span class="n">u16</span> <span class="n">target</span><span class="p">;</span>
+    <span class="n">u8</span> <span class="n">set</span><span class="p">;</span>
+<span class="p">};</span>
+
+<span class="k">struct</span> <span class="n">event_t</span> <span class="p">{</span>
+    <span class="n">u32</span> <span class="n">time_ms</span><span class="p">;</span>
+    <span class="n">u16</span> <span class="n">type</span><span class="p">;</span>
+    <span class="n">u16</span> <span class="n">target</span><span class="p">;</span>
+    <span class="n">u16</span> <span class="n">source</span><span class="p">;</span>
+
+    <span class="k">union</span> <span class="p">{</span>
+        <span class="n">ev_buff_apply_t</span> <span class="n">buff_apply</span><span class="p">;</span>
+        <span class="n">ev_buff_cleanse_t</span> <span class="n">buff_cleanse</span><span class="p">;</span>
+        <span class="n">ev_buff_remove_t</span> <span class="n">buff_remove</span><span class="p">;</span>
+        <span class="n">ev_cast_t</span> <span class="n">cast</span><span class="p">;</span>
+        <span class="n">ev_damage_t</span> <span class="n">damage</span><span class="p">;</span>
+        <span class="n">ev_health_t</span> <span class="n">health</span><span class="p">;</span>
+        <span class="n">ev_state_t</span> <span class="n">state</span><span class="p">;</span>
+        <span class="n">ev_swap_t</span> <span class="n">swap</span><span class="p">;</span>
+    <span class="p">};</span>
+<span class="p">};</span>
+</code></pre></div>
+<p>Each agent on the map is identified by a 16-bit integer ID. I store
+these IDs for targets and sources as needed for debugging,
+but I also remap these identifiers to my own IDs for agent metadata
+lookup:</p>
+<div class="highlight"><pre class="chroma"><code class="language-cpp" data-lang="cpp"><span class="k">struct</span> <span class="n">agent_t</span> <span class="p">{</span>
+    <span class="p">...</span>
+    <span class="n">u16</span> <span class="n">log_id</span><span class="p">;</span>
+    <span class="n">u16</span> <span class="n">game_id</span><span class="p">;</span>
+    <span class="n">u16</span> <span class="n">species_id</span><span class="p">;</span>
+    <span class="n">u8</span> <span class="n">subgroup_id</span><span class="p">;</span>
+    <span class="n">u8</span> <span class="n">profession_type</span><span class="p">;</span>
+    <span class="n">u8</span> <span class="n">is_player</span><span class="p">;</span>
+    <span class="n">u8</span> <span class="n">is_name_resolved</span><span class="p">;</span>
+    <span class="n">CHAR</span> <span class="n">name</span><span class="p">[</span><span class="mi">30</span><span class="p">];</span>
+    <span class="n">CHAR</span> <span class="n">account</span><span class="p">[</span><span class="mi">30</span><span class="p">];</span>
+    <span class="n">stats_t</span> <span class="n">stats</span><span class="p">;</span>
+    <span class="n">gear_t</span> <span class="n">gear</span><span class="p">;</span>
+    <span class="p">...</span>
+<span class="p">};</span>
+</code></pre></div>
+<p>When an agent is removed from the map (death, despawn, disconnection), their
+ID can be reused for newly spawning players or enemies. I maintain a lookup table
+for the remapping. When a new agent enters the player&rsquo;s vision during combat I replace
+any existing entry with the same ID in the lookup table with the new agent if the entry
+isn&rsquo;t the same player or &ldquo;boss&rdquo; as the new agent. This allows for stats to carry
+over when agents leave and enter the player&rsquo;s vision.</p>
+
+<h3 id="dps-overlay">DPS Overlay</h3>
+
+<p><img src="../../img/ggdm_dps_overlay.png" alt="DPS Overlay" /></p>
+
+<p>I keep a hash table for each agent in combat &ndash; a target. For each target,
+I keep another hash table for all the source agents that deal damage to the target.
+This is enables O(1) insertion for new damage done, and O(1) queries for the currently
+selected target. Most game maps can only have a total of 100 players, so the source hash
+table stores its nodes in a fixed size array of 128 source nodes. When full, the
+array replaces any source that has not attacked the target &ldquo;recently&rdquo;.</p>
+
+<p>Calculating DPS is dividing the total damage dealt done by the time spent
+in combat. Since enemies can become invulnerable, I keep track of when
+invulnerability starts and ends and &ldquo;pause&rdquo; the timer during these periods:</p>
+<div class="highlight"><pre class="chroma"><code class="language-cpp" data-lang="cpp"><span class="k">if</span> <span class="p">(</span><span class="n">ev</span><span class="p">.</span><span class="n">state</span><span class="p">.</span><span class="n">action</span> <span class="o">==</span> <span class="n">CBT_STATE_INVUL_START</span><span class="p">)</span> <span class="p">{</span>
+    <span class="n">frozen</span> <span class="o">=</span> <span class="nb">true</span><span class="p">;</span>
+    <span class="n">time_elapsed</span> <span class="o">+=</span> <span class="p">(</span><span class="n">ev</span><span class="p">.</span><span class="n">time_ms</span> <span class="o">-</span> <span class="n">time_started</span><span class="p">);</span>
+    <span class="n">time_started</span> <span class="o">=</span> <span class="n">ev</span><span class="p">.</span><span class="n">time_ms</span><span class="p">;</span>
+<span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="p">(</span><span class="n">ev</span><span class="p">.</span><span class="n">state</span><span class="p">.</span><span class="n">action</span> <span class="o">==</span> <span class="n">CBT_STATE_INVUL_LEAVE</span> <span class="o">&amp;&amp;</span> <span class="n">frozen</span><span class="p">)</span> <span class="p">{</span>
+    <span class="n">frozen</span> <span class="o">=</span> <span class="nb">false</span><span class="p">;</span>
+    <span class="n">time_started</span> <span class="o">=</span> <span class="n">ev</span><span class="p">.</span><span class="n">time_ms</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+<h3 id="condition-damage-simulation">Condition Damage Simulation</h3>
+
+<p>The server only sends exact damage numbers for any direct damage done within
+the client&rsquo;s &ldquo;vision&rdquo;. Condition damage is &ldquo;damage over time&rdquo; and is only
+sent when the player is either the source or the target of the damage.
+Since characters can be &ldquo;built&rdquo; in a way that most of their damage is done with conditions, I
+need to estimate condition damage done by other players to provide useful data
+for analysis. Damage is calculated on the server and sent to the client, so I use a
+simulation based on the server&rsquo;s observable behavior to produce these estimates.</p>
+
+<p>Applying any buff or condition &ldquo;effect&rdquo; to an agent starts a timer that ticks once per
+second for the agent. As long as there are effects on the agent, the timer will
+continue to tick. This timer affects any future condition applied, since
+the difference in time between the application of the effect and the next tick
+is subtracted from the duration of the effect and calculated as a &ldquo;partial tick&rdquo;.
+Partial ticks may also occur when the effect is expiring but the duration is less
+than a full tick (1000ms).</p>
+
+<p>For each source in the target hash table, I store an array of effects the source
+applied to the target. Insertion and single stack removal are O(1) (swapping
+elements around), but multi stack removal is O(n). Although a hash
+table for each effect type could be used here for performance, a source can apply
+hundreds of effects to a target, and every type isn&rsquo;t known in advance. The array
+is more favorable for its space and cache efficiency.</p>
+
+<p>On every simulation tick (1000ms) I calculate the active number of stacks of each type
+(bleeding, burning, etc&hellip;) and calculate the damage done based on their individual
+formula. This is done in a loop over each source for each target, since both the
+target and source need their stats calculated for the condition
+damage formula.</p>
+
+<p>Since the server doesn&rsquo;t send the real stat values for any agent that&rsquo;s not the
+player, I need to to estimate agent stats based on equipment, traits and active effects.
+Equipment and traits aren&rsquo;t supposed to be visible to other players, but
+Guild Wars 2 sends this data to the client anyway. Most equipment stats can be calculated
+by cross referencing tooltip data in the game&rsquo;s content definitions, but traits need
+to be handled on a case-by-case basis. Most of the maintenance work of the meter was
+fixing the stat estimation subsystem after balance updates.</p>
+
+<p>With the combination of stat estimation and effect simulation, this system
+produces near perfect estimates for condition damage. The only source of error
+occurs due to rounding differences based on tick start and application times.
+The error typically accumulates on the first and last tick for a single
+stack at a rate of 0±1 per stack, so error is dependent on the frequency
+of conditions applied. Most classes produce damage estimates that are within ~0.12%
+of their real values.</p>
+
+<h3 id="log-panel">Log Panel</h3>
+
+<p><img src="../../img/ggdm_log_overview.png" alt="Log Overview Panel" /></p>
+
+<p>Logging starts when the player enters combat and finishes when the player
+leaves. It&rsquo;s setup to save the log to disk if the time spent fighting passes a user-set
+minimum. The meter watches the log folder for any changes so logs can be shared
+between players. The meter always keeps the current (or last) combat encounter
+and dynamically updates the analysis in real-time during combat while the
+panel is open.</p>
+
+<p><img src="../../img/ggdm_log_filter.png" alt="Log Filtering" /></p>
+
+<p>Nearly every list in the log panel can be filtered to help find data faster. Search
+data is retained and updated for any change in the filter text. Results that
+pass the filter are simply indices into the data used to populate the list.</p>
+
+<p><img src="../../img/ggdm_log_dmg_taken.png" alt="Log Damage Taken" /></p>
+
+<p>The two main views present the same data for two different interpretations:
+target → source and source → target. A graph view is available for either
+total damage done or DPS (the last 10s of damage at that point in time).
+The graph and data can be filtered based on the selected entries in
+target, source and skill.</p>
+
+<p><img src="../../img/ggdm_log_buffs.png" alt="Log Buffs" /></p>
+
+<p>The buffs view actually displays both conditions and boons. It gives
+an analysis of the uptime over the duration of the fight, the average
+number of stacks on a target, and applications over time (per-source).</p>
+
+<p><img src="../../img/ggdm_gear_overview.png" alt="Log Gear" /></p>
+
+<p>The gear panel shows the equipment and traits for every agent/player that
+took part in combat and their estimated stats used for the condition
+simulation. Nice for debugging, but also nice to see how other players
+achieve their DPS numbers.</p>
+
+<p><img src="../../img/ggdm_log_history.png" alt="Log History" /></p>
+
+<p>The last panel is mostly just a direct display of the events in the log with
+a few filtering options. Damage, skills casts, rotation, and effect application
+and removal are all available.</p>
+
+<h3 id="build-templates">Build Templates</h3>
+
+<p><img src="../../img/ggdm_build_templates.png" alt="Build Templates Panel" /></p>
+
+<p>Guild Wars 2 encourages swapping equipment and traits for optimizing
+combat encounters but doesn&rsquo;t offer any automation for the process.
+I make use of the system used for estimating stats to also let the user
+save a &ldquo;template&rdquo; of their current &ldquo;build&rdquo;. The player can load back the template or
+remove (strip) all their current gear into their inventory or bank for
+easy access on another one of the player&rsquo;s characters.</p>
+
+<p>The process works by calling the same functions (and sending the same
+network messages to the server) that the game normally does for
+equip, removal or stat swapping operations in the native UI. All of
+the functions involved in this process are trivially reversed engineered
+from the player inventory class and its <a href="https://en.wikipedia.org/wiki/Virtual_method_table">vtable</a>.
+The process is functionally identical to manual swapping but happens at a much
+faster rate.</p>
+
+<h3 id="gui-additions">GUI Additions</h3>
+
+<p><img src="../../img/ggdm_attack_overlay.png" alt="Attack Overlay and Compass" /></p>
+
+<p>The game has a lot of visual &ldquo;noise&rdquo; in its presentation that can it difficult to see
+animations and behavior of enemies. For every enemy in an attack animation, the attack overlay
+shows the name of the attack the enemy is casting and the remaining duration of the animation.
+This feature is pretty common in an add-ons for other MMOs (World of Warcraft, Deadly Boss Mods).</p>
+
+<p>The other feature pictured in the screenshot is a compass that renders around
+the player&rsquo;s character model. This is useful for navigating and responding to
+mechanics during raids. I actually render this in 2D, but portions that would obscure
+the player are faded out.</p>
+
+<p><img src="../../img/ggdm_health_overlay.png" alt="Health Overlay" /></p>
+
+<p>The &ldquo;health&rdquo; overlay displays player status over every allied player. This helps
+for healing and buffing, since it displays player health and the number of stacks of
+important damage boosting buffs (might, alacrity). The health bar color
+also changes depending on player &ldquo;stance&rdquo;, letting healers know when the player
+can&rsquo;t receive healing.</p>
+
+<p><img src="../../img/ggdm_gadget_overlay.png" alt="Gadget Overlay" /></p>
+
+<p>The &ldquo;gadget&rdquo; overlay displays the name and distance for any interactable object in the scene.
+Since the labels for gadgets vanish over distance and are obscured by walls, this significantly
+helps in finding these objects. Labels like these are sorted by screen depth after a projection
+to screen space, but limited to 500 labels per-frame for performance.</p>
+
+<p>Retrieving the agent names is an asynchronous process (and can be fairly slow depending on
+the agent type). I maintain a lookup table based on agent ID and limit the number of
+agent names that can be resolved per-frame.</p>
+
+<p><img src="../../img/ggdm_target_info.png" alt="Target Info Overlay" /></p>
+
+<p>The target info overlay displays the health percentage, health value, and distance to the target.
+Raw health values are fun to see when you wipe to bosses that only have a few thousand
+health left. The breakbar value is also displayed if the target&rsquo;s breakbar is active.</p>
+
+<p><img src="../../img/ggdm_render_scaling.png" alt="Target Info Overlay" /></p>
+
+<p>The renderer also supports internal scaling of the UI, so all of these additions work
+irrespective of monitor DPI. Some elements also scale and change position based on
+the in-game user setting for interface scale.</p>
+
+<h3 id="open-source">Open Source</h3>
+
+<p>For now, I plan on keeping GGDM closed source.</p>
+
+<p>I started the project in 2015
+as a an add-on that would share DPS between any members of the party running the
+meter. No condition estimation, combat analysis, or even a real GUI existed at
+this point of time, and the meter used a client-server model to share the
+DPS data. I released the source code for this version of the meter in
+early 2016 and put the project on hold until late 2016. During this time,
+the project was forked, modified and advertised publicly with changes
+that endangered the security of its users.</p>
+
+<p>The auto-updating mechanism for the client and server was included in
+this early source release, but the developer of the fork misunderstood
+how to deliver authentic updates to their users. While the updates were
+signed, they sent the public key used for verification along with
+the update data itself &ndash; making the authentication pointless.
+My public key was even left embedded in every version of the fork.</p>
+
+<p>The fork and its developer were eventually banned from the
+game for long-standing violations of the terms of service. While
+open source software can help communities grow, it also provides
+opportunities for misuse &ndash; the developer even took monetary
+donations for the work.</p>
+
+<h3 id="closing-thoughts">Closing Thoughts</h3>
+
+<p>GGDM was helped influence and popularize the direction of
+third party add-on development for Guild Wars 2. Players
+today can enjoy alternatives with similar functionality (arcdps)
+thanks to the discussion it sparked within the game&rsquo;s community from
+forks of the project.</p>
+</article>
+</main>
+<footer class="site-footer">
+    <hr/>
+    &copy; 2018 nkga. Code snippets licensed under the <a href="https://opensource.org/licenses/MIT">MIT License</a>.
+</footer>
+</div>
+</body>
+</html>
